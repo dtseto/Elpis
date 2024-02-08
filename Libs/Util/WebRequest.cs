@@ -29,7 +29,7 @@ namespace Util
     public class PRequest
     {
         private static WebProxy _proxy;
-        private static string _userAgent = "Mozilla/5.0 (Windows NT 5.1) AppleWebKit/535.7 (KHTML, like Gecko) Chrome/16.0.912.63 Safari/535.7";
+        private static string _userAgent = "pianobar-2022.04.01";
 
         public static WebProxy Proxy { get { return _proxy; } }
 

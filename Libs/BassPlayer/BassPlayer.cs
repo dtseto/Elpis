@@ -1494,7 +1494,7 @@ namespace BassPlayer
 
             // Don't register the fade out event for last.fm radio, as it causes problems
             // if (!_isLastFMRadio)
-            syncHandles.Add(RegisterPlaybackFadeOutEvent(stream, streamIndex, _CrossFadeIntervalMS));
+            // syncHandles.Add(RegisterPlaybackFadeOutEvent(stream, streamIndex, _CrossFadeIntervalMS));
 
             syncHandles.Add(RegisterPlaybackEndEvent(stream, streamIndex));
             syncHandles.Add(RegisterStreamFreedEvent(stream));

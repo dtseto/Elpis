@@ -1051,9 +1051,9 @@ namespace Elpis
 #endif
 
 
-            if (_config.Fields.Proxy_Address != string.Empty)
-                _scrobbler.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-                        _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
+            // if (_config.Fields.Proxy_Address != string.Empty)
+                // _scrobbler.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
+                //         _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
 
             _player.RegisterPlayerControlQuery(_scrobbler);
         }
@@ -1075,7 +1075,7 @@ namespace Elpis
                                                {
                                                    _updatePage = new UpdatePage(_update);
                                                    _updatePage.UpdateSelectionEvent += _updatePage_UpdateSelectionEvent;
-                                                   transitionControl.AddPage(_updatePage);
+                                                   //transitionControl.AddPage(_updatePage);
                                                    ShowPage(_updatePage);
                                                });
                     }
@@ -1090,7 +1090,7 @@ namespace Elpis
                         {
                             _updatePage = new UpdatePage(_update);
                             _updatePage.UpdateSelectionEvent += _updatePage_UpdateSelectionEvent;
-                            transitionControl.AddPage(_updatePage);
+                            //transitionControl.AddPage(_updatePage);
                             ShowPage(_updatePage);
                         });
                     }

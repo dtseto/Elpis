@@ -1,17 +1,33 @@
-__*********************************************************************************************__
+## Elpis not dead
+Elpis is sadly no longer developed by its author, Adam Haile, as you can read in the readme of the base repository.
 
-__*********************************************************************************************__
+My fork contains minimal changes required to run Elpis and scrobble to last.fm as of February 2024.
 
-**Elpis is no longer developed! Issues are now closed and pull requests are no longer accepted.**
+Feel free to report issues, suggest new features or open pull requests in this repository.
 
-**The source is GPL licensed, so feel free to fork and make whatever changes you would like.**
+To run the app:  
+1. Register at [bass.radio42.com/bass_register.html](http://bass.radio42.com/bass_register.html)
+1. Create API account at [last.fm/api/account/create](https://www.last.fm/api/account/create) (to enable scrobbling)
+1. Create file `Elpis/ReleaseData/ReleaseData.cs`:
+```csharp
+namespace Elpis
+{
+    public class ReleaseData
+    {
+        public const string BassRegEmail = "<bass.net-license-email>";
+        public const string BassRegKey = "<bass.net-license-key>";
+        public const string UpdateBaseUrl = @"";
+        public const string UpdateConfigFile = "";
+        public const string AnalyticsPostURL = @"";
+        public const string LastFMApiKey = "<api-key>";
+        public const string LastFMApiSecret = "<api-secret>";
+        public const string AmazonTag = "";
+    }
+}
+```
+Then build `AppRelease | Mixed Platforms` in your IDE and run Elpis.exe.
 
-**Sorry, I just don't have time for this project any longer.**
-
-__*********************************************************************************************__
-
-__*********************************************************************************************__
-
+## Elpis
 
 Elpis is native Windows client for the Pandora Radio music service, implemented in C# and WPF.  
 

@@ -1,3 +1,13 @@
+<img width="448" height="615" alt="image" src="https://github.com/user-attachments/assets/8376da92-3bd7-4c67-940f-b39f8a731fb2" />
+
+Elpis 1.6.0 running on Windows with dot net installed.
+
+Download the release package and install dot net 4.8. Enter your pandora email and pw.
+
+https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48
+
+Bugs: There are known occasional race conditions and glitches when changing stations or skipping tracks. Just close and restart the program.
+
 ## Elpis not dead
 Elpis is sadly no longer developed by its author, Adam Haile, as you can read in the readme of the base repository.
 

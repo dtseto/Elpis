@@ -152,6 +152,7 @@ namespace BassPlayer
     //}
 
 
+
     public class BassException : Exception
     {
         public BassException()
@@ -186,6 +187,9 @@ namespace BassPlayer
     /// </summary>
     public class BassAudioEngine : IDisposable // : IPlayer
     {
+        // new basslock
+        private readonly object _bassLock = new object();
+
         #region Enums
 
         /// <summary>
@@ -326,6 +330,8 @@ namespace BassPlayer
         private int _progUpdateInterval = 500; //update every 500 ms
         private int _speed = 1;
         private TAG_INFO _tagInfo;
+
+        private int _currentStreamHandle = 0;
 
         // Midi File support
         private BASS_MIDI_FONT[] soundFonts;
@@ -1163,271 +1169,189 @@ namespace BassPlayer
         /// <returns></returns>
         public bool Play(string filePath)
         {
-            if (!_Initialized)
+            lock (_bassLock)
             {
-                return false;
-            }
-
-            try
-            {
-                UpdateTimer.Stop();
-            }
-            catch
-            {
-                throw new BassStreamException("Bass Error: Update Timer Error");
-            }
-            int stream = GetCurrentStream();
-
-            bool doFade = false;
-            bool result = true;
-            Speed = 1; // Set playback Speed to normal speed
-
-            try
-            {
-                if (Paused || (filePath.ToLower().CompareTo(FilePath.ToLower()) == 0 && stream != 0))
+                if (!_Initialized)
                 {
-                    bool doReturn = !Paused;
-                    // Selected file is equal to current stream
-                    if (_State == PlayState.Paused)
-                    {
-                        // Resume paused stream
-                        if (_SoftStop)
-                        {
-                            Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1, 500);
-                        }
-                        else
-                        {
-                            Bass.BASS_ChannelSetAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1);
-                        }
-
-                        result = Bass.BASS_Start();
-
-                        if (result)
-                        {
-                            _State = PlayState.Playing;
-                            UpdateTimer.Start();
-                            if (PlaybackStateChanged != null)
-                            {
-                                PlaybackStateChanged(this, PlayState.Paused, _State);
-                            }
-                        }
-
-                        if (doReturn)
-                            return result;
-                    }
+                    return false;
                 }
 
-                if (stream != 0 && StreamIsPlaying(stream))
+                try
                 {
-                    int oldStream = stream;
-                    double oldStreamDuration = GetTotalStreamSeconds(oldStream);
-                    double oldStreamElapsedSeconds = GetStreamElapsedTime(oldStream);
-                    double crossFadeSeconds = _CrossFadeIntervalMS;
+                    UpdateTimer.Stop();
+                }
+                catch
+                {
+                    throw new BassStreamException("Bass Error: Update Timer Error");
+                }
 
-                    if (crossFadeSeconds > 0)
-                        crossFadeSeconds = crossFadeSeconds/1000.0;
+                bool result = false;
 
-                    if ((oldStreamDuration - (oldStreamElapsedSeconds + crossFadeSeconds) > -1))
+                // Handle the case of resuming a paused song first.
+                if (_State == PlayState.Paused && filePath.ToLower().CompareTo(FilePath.ToLower()) == 0 && _currentStreamHandle != 0)
+                {
+                    if (_SoftStop)
                     {
-                        FadeOutStop(oldStream);
+                        Bass.BASS_ChannelSlideAttribute(_currentStreamHandle, BASSAttribute.BASS_ATTRIB_VOL, 1, 500);
                     }
                     else
                     {
-                        Bass.BASS_ChannelStop(oldStream);
+                        Bass.BASS_ChannelSetAttribute(_currentStreamHandle, BASSAttribute.BASS_ATTRIB_VOL, 1);
                     }
 
-                    doFade = true;
-                    stream = GetNextStream();
+                    result = Bass.BASS_Start();
 
-                    if (stream != 0 || StreamIsPlaying(stream))
+                    if (result)
                     {
-                        FreeStream(stream);
+                        _State = PlayState.Playing;
+                        UpdateTimer.Start();
+                        if (PlaybackStateChanged != null)
+                        {
+                            PlaybackStateChanged(this, PlayState.Paused, _State);
+                        }
                     }
+                    return result;
                 }
 
-                if (stream != 0)
+                // Stop and free the current stream if one is playing or paused.
+                if (_currentStreamHandle > 0)
                 {
-                    if (!Stopped) // Check if stopped already to avoid that Stop() is called two or three times
-                    {
-                        Stop(true);
-                    }
-                    FreeStream(stream);
+                    Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
+
+                    // Manually remove all sync events from the old stream before freeing it.
+                    Bass.BASS_ChannelSetSync(_currentStreamHandle, BASSSync.BASS_SYNC_FREE, 0, null, IntPtr.Zero);
+                    Bass.BASS_ChannelSetSync(_currentStreamHandle, BASSSync.BASS_SYNC_END, 0, null, IntPtr.Zero);
+
+                    // Now safely stop and free the resource.
+                    Bass.BASS_ChannelStop(_currentStreamHandle);
+                    Bass.BASS_StreamFree(_currentStreamHandle);
+
+                    // Crucially, reset the handle to 0 after freeing it.
+                    _currentStreamHandle = 0;
+                    _State = PlayState.Stopped;
                 }
 
                 _State = PlayState.Init;
 
-                // Make sure Bass is ready to begin playing again
-                Bass.BASS_Start();
-
-                if (filePath != string.Empty)
+                try
                 {
-                    // Turn on parsing of ASX files
-                    Bass.BASS_SetConfig(BASSConfig.BASS_CONFIG_NET_PLAYLIST, 2);
-
-                    BASSFlag streamFlags;
-                    if (_Mixing)
-                    {
-                        streamFlags = BASSFlag.BASS_STREAM_DECODE | BASSFlag.BASS_SAMPLE_FLOAT;
-                        // Don't use the BASS_STREAM_AUTOFREE flag on a decoding channel. will produce a BASS_ERROR_NOTAVAIL
-                    }
-                    else
-                    {
-                        streamFlags = BASSFlag.BASS_SAMPLE_FLOAT | BASSFlag.BASS_STREAM_AUTOFREE;
-                    }
+                    // Create the new stream.
+                    BASSFlag streamFlags = _Mixing ? (BASSFlag.BASS_STREAM_DECODE | BASSFlag.BASS_SAMPLE_FLOAT) : (BASSFlag.BASS_SAMPLE_FLOAT | BASSFlag.BASS_STREAM_AUTOFREE);
 
                     FilePath = filePath;
-
                     _isRadio = false;
 
+                    int newStreamHandle = 0;
                     if (filePath.ToLower().Contains(@"http://") || filePath.ToLower().Contains(@"https://") ||
                         filePath.ToLower().StartsWith("mms") || filePath.ToLower().StartsWith("rtsp"))
                     {
-                        _isRadio = true; // We're playing Internet Radio Stream
+                        _isRadio = true;
+                        newStreamHandle = Bass.BASS_StreamCreateURL(filePath, 0, streamFlags, DownloadProcDelegate, IntPtr.Zero);
 
-                        stream = Bass.BASS_StreamCreateURL(filePath, 0, streamFlags, DownloadProcDelegate, IntPtr.Zero);
-
-                        if (stream != 0)
+                        // Register metadata sync
+                        if (newStreamHandle != 0)
                         {
-                            // Get the Tags and set the Meta Tag SyncProc
                             _tagInfo = new TAG_INFO(filePath);
-                            SetStreamTags(stream);
-
-                            if (BassTags.BASS_TAG_GetFromURL(stream, _tagInfo))
+                            SetStreamTags(newStreamHandle);
+                            if (BassTags.BASS_TAG_GetFromURL(newStreamHandle, _tagInfo))
                             {
                                 GetMetaTags();
                             }
-
-                            Bass.BASS_ChannelSetSync(stream, BASSSync.BASS_SYNC_META, 0, MetaTagSyncProcDelegate,
-                                                     IntPtr.Zero);
+                            Bass.BASS_ChannelSetSync(newStreamHandle, BASSSync.BASS_SYNC_META, 0, MetaTagSyncProcDelegate, IntPtr.Zero);
                         }
-                        Log.Debug("BASSAudio: Webstream found - trying to fetch stream {0}", Convert.ToString(stream));
                     }
                     else if (IsMODFile(filePath))
                     {
-                        // Load a Mod file
-                        stream = Bass.BASS_MusicLoad(filePath, 0, 0,
-                                                     BASSFlag.BASS_SAMPLE_SOFTWARE | BASSFlag.BASS_SAMPLE_FLOAT |
-                                                     BASSFlag.BASS_MUSIC_AUTOFREE | BASSFlag.BASS_MUSIC_PRESCAN |
-                                                     BASSFlag.BASS_MUSIC_RAMP, 0);
+                        newStreamHandle = Bass.BASS_MusicLoad(filePath, 0, 0, BASSFlag.BASS_SAMPLE_SOFTWARE | BASSFlag.BASS_SAMPLE_FLOAT | BASSFlag.BASS_MUSIC_AUTOFREE | BASSFlag.BASS_MUSIC_PRESCAN | BASSFlag.BASS_MUSIC_RAMP, 0);
                     }
                     else
                     {
-                        // Create a Standard Stream
-                        stream = Bass.BASS_StreamCreateFile(filePath, 0, 0, streamFlags);
+                        newStreamHandle = Bass.BASS_StreamCreateFile(filePath, 0, 0, streamFlags);
                     }
 
-                    // Is Mixing, then we create a mixer channel and assign the stream to the mixer
-                    if ((_Mixing) && stream != 0)
+                    // After successfully creating a stream, assign it to the field.
+                    if (newStreamHandle != 0)
                     {
-                        // Do an upmix of the stereo according to the matrix. 
-                        // Now Plugin the stream to the mixer and set the mixing matrix
-                        BassMix.BASS_Mixer_StreamAddChannel(_mixer, stream,
-                                                            BASSFlag.BASS_MIXER_MATRIX | BASSFlag.BASS_STREAM_AUTOFREE |
-                                                            BASSFlag.BASS_MIXER_NORAMPIN | BASSFlag.BASS_MIXER_BUFFER);
-                        BassMix.BASS_Mixer_ChannelSetMatrix(stream, _MixingMatrix);
-                    }
+                        _currentStreamHandle = newStreamHandle;
 
-                    Streams[CurrentStreamIndex] = stream;
-
-                    if (stream != 0)
-                    {
-                        // When we have a MIDI file, we need to assign the sound banks to the stream
-                        if (IsMidiFile(filePath) && soundFonts != null)
+                        // Add stream to mixer if needed
+                        if (_Mixing)
                         {
-                            BassMidi.BASS_MIDI_StreamSetFonts(stream, soundFonts, soundFonts.Length);
-                        }
-
-                        StreamEventSyncHandles[CurrentStreamIndex] = RegisterPlaybackEvents(stream, CurrentStreamIndex);
-
-                        if (doFade && _CrossFadeIntervalMS > 0)
-                        {
-                            _CrossFading = true;
-
-                            // Reduce the stream volume to zero so we can fade it in...
-                            Bass.BASS_ChannelSetAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 0);
-
-                            // Fade in from 0 to 1 over the _CrossFadeIntervalMS duration 
-                            Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1,
-                                                            _CrossFadeIntervalMS);
+                            BassMix.BASS_Mixer_StreamAddChannel(_mixer, _currentStreamHandle, BASSFlag.BASS_MIXER_MATRIX | BASSFlag.BASS_STREAM_AUTOFREE | BASSFlag.BASS_MIXER_NORAMPIN | BASSFlag.BASS_MIXER_BUFFER);
+                            BassMix.BASS_Mixer_ChannelSetMatrix(_currentStreamHandle, _MixingMatrix);
                         }
                     }
                     else
                     {
+                        // Handle stream creation failure gracefully.
                         BASSError error = Bass.BASS_ErrorGetCode();
-                        Log.Error("BASS: Unable to create Stream for {0}.  Reason: {1}.", filePath,
-                                  Enum.GetName(typeof(BASSError), error));
-                        throw new BassStreamException("Bass Error: Unable to create stream - " +
-                                                      Enum.GetName(typeof(BASSError), error), error);
+                        Log.Error($"BASS: Unable to create Stream for {filePath}. Reason: {Enum.GetName(typeof(BASSError), error)}.");
+                        throw new BassStreamException($"Bass Error: Unable to create stream - {Enum.GetName(typeof(BASSError), error)}", error);
                     }
 
-                    bool playbackStarted = false;
-                    if (_Mixing)
-                    {
-                        if (Bass.BASS_ChannelIsActive(_mixer) == BASSActive.BASS_ACTIVE_PLAYING)
-                        {
-                            playbackStarted = true;
-                        }
-                        else
-                        {
-                            playbackStarted = Bass.BASS_ChannelPlay(_mixer, false);
-                        }
-                    }
-                    else
-                    {
-                        playbackStarted = Bass.BASS_ChannelPlay(stream, false);
-                    }
+                    // Register callbacks for the new, active stream.
+                    RegisterPlaybackEvents(_currentStreamHandle);
 
-                    if (stream != 0 && playbackStarted)
+                    // Play the new stream.
+                    bool playbackStarted = Bass.BASS_ChannelPlay(_currentStreamHandle, false);
+
+                    if (playbackStarted)
                     {
                         Log.Info("BASS: playback started");
-
-                        PlayState oldState = _State;
                         _State = PlayState.Playing;
-
                         UpdateTimer.Start();
-
-                        if (oldState != _State && PlaybackStateChanged != null)
+                        if (PlaybackStateChanged != null)
                         {
-                            PlaybackStateChanged(this, oldState, _State);
+                            PlaybackStateChanged(this, PlayState.Stopped, _State);
                         }
-
                         if (PlaybackStart != null)
                         {
-                            PlaybackStart(this, GetTotalStreamSeconds(stream));
+                            PlaybackStart(this, GetTotalStreamSeconds(_currentStreamHandle));
                         }
+                        result = true;
                     }
-
                     else
                     {
-                        BASSError error = Bass.BASS_ErrorGetCode();
-                        Log.Error("BASS: Unable to play {0}.  Reason: {1}.", filePath,
-                                  Enum.GetName(typeof(BASSError), error));
-                        throw new BassStreamException("Bass Error: Unable to play - " +
-                                                      Enum.GetName(typeof(BASSError), error), error);
-
-                        // Release all of the sync proc handles
-                        if (StreamEventSyncHandles[CurrentStreamIndex] != null)
-                        {
-                            UnregisterPlaybackEvents(stream, StreamEventSyncHandles[CurrentStreamIndex]);
-                        }
-
+                        // Handle playback start failure gracefully.
+                        Bass.BASS_StreamFree(_currentStreamHandle);
+                        _currentStreamHandle = 0;
                         result = false;
                     }
                 }
+                catch (Exception ex)
+                {
+                    result = false;
+                    Log.Error("BASS: Play caused an exception: {0}.", ex);
+                    if (ex.GetType() == typeof(BassStreamException))
+                    {
+                        throw;
+                    }
+                    throw new BassException("BASS: Play caused an exception: " + ex);
+                }
+
+                return result;
             }
-            catch (Exception ex)
-            {
-                result = false;
-                Log.Error("BASS: Play caused an exception:  {0}.", ex);
-
-                if (ex.GetType() == typeof (BassStreamException))
-                    throw;
-
-                throw new BassException("BASS: Play caused an exception: " + ex);
-            }
-
-            return result;
         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
         /// <summary>
@@ -1483,7 +1407,7 @@ namespace BassPlayer
         /// <param name="stream"></param>
         /// <param name="streamIndex"></param>
         /// <returns></returns>
-        private List<int> RegisterPlaybackEvents(int stream, int streamIndex)
+        private List<int> RegisterPlaybackEvents(int stream)
         {
             if (stream == 0)
             {
@@ -1496,7 +1420,7 @@ namespace BassPlayer
             // if (!_isLastFMRadio)
             // syncHandles.Add(RegisterPlaybackFadeOutEvent(stream, streamIndex, _CrossFadeIntervalMS));
 
-            syncHandles.Add(RegisterPlaybackEndEvent(stream, streamIndex));
+            syncHandles.Add(RegisterPlaybackEndEvent(stream));
             syncHandles.Add(RegisterStreamFreedEvent(stream));
 
             return syncHandles;
@@ -1541,7 +1465,7 @@ namespace BassPlayer
         /// <param name="stream"></param>
         /// <param name="streamIndex"></param>
         /// <returns></returns>
-        private int RegisterPlaybackEndEvent(int stream, int streamIndex)
+        private int RegisterPlaybackEndEvent(int stream)
         {
             int syncHandle = 0;
 
@@ -1629,17 +1553,41 @@ namespace BassPlayer
             {
                 List<int> eventSyncHandles = StreamEventSyncHandles[streamIndex];
 
-                foreach (int syncHandle in eventSyncHandles)
+                //new event synch handle to wrap
+                if (eventSyncHandles != null)
                 {
-                    Bass.BASS_ChannelRemoveSync(stream, syncHandle);
+
+
+                    foreach (int syncHandle in eventSyncHandles)
+                    {
+
+                        if (syncHandle != 0)
+                        {
+                            // wrap channel remove sync in synchandle
+                            Bass.BASS_ChannelRemoveSync(stream, syncHandle);
+                        }
+
+                    }
+
+                    // Clear the list of sync handles for the freed stream slot
+                    StreamEventSyncHandles[streamIndex].Clear();
+
                 }
+
+                }
+
+                // This is the manual FreeStream, only happens on a Next/Stop action.
+                // It's safe to call BASS_StreamFree here as the stream won't naturally end
+                // and trigger the BASS_STREAM_AUTOFREE logic.
+
+                Bass.BASS_StreamFree(stream);
+                Streams[streamIndex] = 0; // Mark the stream slot as empty
+                _CrossFading = false;
+
+                //stream = 0;
+                // _CrossFading = false; // Set crossfading to false,
+                // will update it when the next song starts
             }
-
-            Bass.BASS_StreamFree(stream);
-            stream = 0;
-
-            _CrossFading = false; // Set crossfading to false, Play() will update it when the next song starts
-        }
 
         /// <summary>
         /// Is stream Playing?
@@ -1772,6 +1720,9 @@ namespace BassPlayer
                 TrackPlaybackCompleted(this, FilePath);
             }
 
+            // Remove the sync handle to prevent it from being called again.
+            // The stream itself will be freed by BASS_STREAM_AUTOFREE.
+
             bool removed = Bass.BASS_ChannelRemoveSync(stream, handle);
             if (removed)
             {
@@ -1797,6 +1748,9 @@ namespace BassPlayer
             {
                 if (stream == Streams[i])
                 {
+                    // Set stream handle to 0, but do not call Bass.BASS_StreamFree,
+                    // as it's handled by the BASS_STREAM_AUTOFREE flag.
+
                     Streams[i] = 0;
                     break;
                 }
@@ -1927,7 +1881,16 @@ namespace BassPlayer
             }
 
             //int level = Bass.BASS_ChannelGetLevel(stream);
-            Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, -1, _CrossFadeIntervalMS);
+
+            //Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, -1, _CrossFadeIntervalMS);
+
+            // This line performs an abrupt stop instead of a gradual fade-out.
+            Bass.BASS_ChannelStop(stream);
+            // After stopping, you should also free the stream to release its resources.
+            // This part is crucial for stability and to prevent resource leaks.
+            FreeStream(stream);
+            Log.Debug("BASS: Abruptly stopped and freed stream {0}", stream);
+
         }
 
         /// <summary>
@@ -1935,125 +1898,131 @@ namespace BassPlayer
         /// </summary>
         public void PlayPause()
         {
-            _CrossFading = false;
-            int stream = GetCurrentStream();
-
-            Log.Debug("BASS: Pause of stream {0}", stream);
-            try
+            lock (_bassLock)
             {
-                PlayState oldPlayState = _State;
 
-                if (oldPlayState == PlayState.Ended || oldPlayState == PlayState.Init)
+                _CrossFading = false;
+                int stream = GetCurrentStream();
+
+                Log.Debug("BASS: Pause of stream {0}", stream);
+                try
                 {
-                    return;
-                }
+                    PlayState oldPlayState = _State;
 
-                if (oldPlayState == PlayState.Paused)
-                {
-                    _State = PlayState.Playing;
-
-                    if (_SoftStop)
+                    if (oldPlayState == PlayState.Ended || oldPlayState == PlayState.Init)
                     {
-                        // Fade-in over 500ms
-                        Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1, 500);
-                        Bass.BASS_Start();
+                        return;
+                    }
+
+                    if (oldPlayState == PlayState.Paused)
+                    {
+                        _State = PlayState.Playing;
+
+                        if (_SoftStop)
+                        {
+                            // Fade-in over 500ms
+                            Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1, 500);
+                            Bass.BASS_Start();
+                        }
+
+                        else
+                        {
+                            Bass.BASS_ChannelSetAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1);
+                            Bass.BASS_Start();
+                        }
+
+                        UpdateTimer.Start();
                     }
 
                     else
                     {
-                        Bass.BASS_ChannelSetAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 1);
-                        Bass.BASS_Start();
+                        _State = PlayState.Paused;
+                        UpdateTimer.Stop();
+
+                        if (_SoftStop)
+                        {
+                            // Fade-out over 500ms
+                            Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 0, 500);
+
+                            // Wait until the slide is done
+                            while (Bass.BASS_ChannelIsSliding(stream, BASSAttribute.BASS_ATTRIB_VOL))
+                                Thread.Sleep(20);
+
+                            Bass.BASS_Pause();
+                        }
+
+                        else
+                        {
+                            Bass.BASS_Pause();
+                        }
                     }
 
-                    UpdateTimer.Start();
+                    if (oldPlayState != _State)
+                    {
+                        if (PlaybackStateChanged != null)
+                        {
+                            PlaybackStateChanged(this, oldPlayState, _State);
+                        }
+                    }
                 }
 
-                else
+                catch
                 {
-                    _State = PlayState.Paused;
-                    UpdateTimer.Stop();
-
-                    if (_SoftStop)
-                    {
-                        // Fade-out over 500ms
-                        Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, 0, 500);
-
-                        // Wait until the slide is done
-                        while (Bass.BASS_ChannelIsSliding(stream, BASSAttribute.BASS_ATTRIB_VOL))
-                            Thread.Sleep(20);
-
-                        Bass.BASS_Pause();
-                    }
-
-                    else
-                    {
-                        Bass.BASS_Pause();
-                    }
                 }
-
-                if (oldPlayState != _State)
-                {
-                    if (PlaybackStateChanged != null)
-                    {
-                        PlaybackStateChanged(this, oldPlayState, _State);
-                    }
-                }
-            }
-
-            catch
-            {
             }
         }
-
         /// <summary>
         /// Stopping Playback
         /// </summary>
         public void Stop(bool songSkipped = false)
         {
-            _CrossFading = false;
-
-            int stream = GetCurrentStream();
-            Log.Debug("BASS: Stop of stream {0}", stream);
-            try
+            lock (_bassLock)
             {
-                UpdateTimer.Stop();
-                if (_SoftStop)
-                {
-                    Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, -1, 500);
 
-                    // Wait until the slide is done
-                    while (Bass.BASS_ChannelIsSliding(stream, BASSAttribute.BASS_ATTRIB_VOL))
-                        Thread.Sleep(20);
-                }
-                if (_Mixing)
+                _CrossFading = false;
+
+                int stream = GetCurrentStream();
+                Log.Debug("BASS: Stop of stream {0}", stream);
+                try
                 {
-                    Bass.BASS_ChannelStop(stream);
-                    BassMix.BASS_Mixer_ChannelRemove(stream);
-                }
-                else
-                {
-                    Bass.BASS_ChannelStop(stream);
+                    UpdateTimer.Stop();
+                    if (_SoftStop)
+                    {
+                        Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, -1, 500);
+
+                        // Wait until the slide is done
+                        while (Bass.BASS_ChannelIsSliding(stream, BASSAttribute.BASS_ATTRIB_VOL))
+                            Thread.Sleep(20);
+                    }
+                    if (_Mixing)
+                    {
+                        Bass.BASS_ChannelStop(stream);
+                        BassMix.BASS_Mixer_ChannelRemove(stream);
+                    }
+                    else
+                    {
+                        Bass.BASS_ChannelStop(stream);
+                    }
+
+                    stream = 0;
+
+                    if (PlaybackStop != null)
+                    {
+                        PlaybackStop(this);
+                    }
+
+                    HandleSongEnded(true, songSkipped);
                 }
 
-                stream = 0;
-
-                if (PlaybackStop != null)
+                catch (Exception ex)
                 {
-                    PlaybackStop(this);
+                    Log.Error("BASS: Stop command caused an exception - {0}", ex.Message);
+                    throw new BassException("BASS: Stop command caused an exception - }" + ex.Message);
                 }
 
-                HandleSongEnded(true, songSkipped);
+                NotifyPlaying = false;
             }
-
-            catch (Exception ex)
-            {
-                Log.Error("BASS: Stop command caused an exception - {0}", ex.Message);
-                throw new BassException("BASS: Stop command caused an exception - }" + ex.Message);
-            }
-
-            NotifyPlaying = false;
         }
-
         /// <summary>
         /// Is Seeking enabled 
         /// </summary>
@@ -2463,4 +2432,7 @@ namespace BassPlayer
 
         public event DownloadCanceledHandler DownloadCanceled;
     }
+
+
 }
+

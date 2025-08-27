@@ -278,7 +278,9 @@ namespace BassPlayer
 
         private const int MAXSTREAMS = 1;
         private readonly List<int> DecoderPluginHandles = new List<int>();
-        private readonly List<List<int>> StreamEventSyncHandles = new List<List<int>>();
+        //private readonly List<List<int>> StreamEventSyncHandles = new List<List<int>>();
+        private List<int> _currentStreamSyncHandles = new List<int>();
+
         private readonly List<int> Streams = new List<int>(MAXSTREAMS);
         private readonly BASSTimer UpdateTimer = new BASSTimer();
 
@@ -693,8 +695,8 @@ namespace BassPlayer
                 DownloadProcDelegate = DownloadProc;
 
 
-                StreamEventSyncHandles.Add(new List<int>());
-                StreamEventSyncHandles.Add(new List<int>());
+                //StreamEventSyncHandles.Add(new List<int>());
+                //StreamEventSyncHandles.Add(new List<int>());
 
                 LoadAudioDecoderPlugins();
 
@@ -929,22 +931,22 @@ namespace BassPlayer
         /// <returns></returns>
         internal int GetCurrentStream()
         {
-            if (Streams.Count == 0)
-            {
-                return -1;
-            }
+          //  if (Streams.Count == 0)
+          //  {
+          //      return -1;
+          //  }
 
-            if (CurrentStreamIndex < 0)
-            {
-                CurrentStreamIndex = 0;
-            }
+           // if (CurrentStreamIndex < 0)
+           // {
+           //     CurrentStreamIndex = 0;
+           // }
 
-            else if (CurrentStreamIndex >= Streams.Count)
-            {
-                CurrentStreamIndex = Streams.Count - 1;
-            }
+           // else if (CurrentStreamIndex >= Streams.Count)
+           // {
+           //     CurrentStreamIndex = Streams.Count - 1;
+           // }
 
-            return Streams[CurrentStreamIndex];
+            return _currentStreamHandle;
         }
 
         /// <summary>
@@ -1180,11 +1182,12 @@ namespace BassPlayer
                 {
                     UpdateTimer.Stop();
                 }
-                catch
+                catch (Exception)
                 {
                     throw new BassStreamException("Bass Error: Update Timer Error");
                 }
 
+                // Declare result once at the top of the method
                 bool result = false;
 
                 // Handle the case of resuming a paused song first.
@@ -1199,7 +1202,7 @@ namespace BassPlayer
                         Bass.BASS_ChannelSetAttribute(_currentStreamHandle, BASSAttribute.BASS_ATTRIB_VOL, 1);
                     }
 
-                    result = Bass.BASS_Start();
+                    result = Bass.BASS_Start(); // Assign value to the top-level 'result'
 
                     if (result)
                     {
@@ -1213,30 +1216,12 @@ namespace BassPlayer
                     return result;
                 }
 
-                // Stop and free the current stream if one is playing or paused.
-                if (_currentStreamHandle > 0)
-                {
-                    Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
-
-                    // Manually remove all sync events from the old stream before freeing it.
-                    Bass.BASS_ChannelSetSync(_currentStreamHandle, BASSSync.BASS_SYNC_FREE, 0, null, IntPtr.Zero);
-                    Bass.BASS_ChannelSetSync(_currentStreamHandle, BASSSync.BASS_SYNC_END, 0, null, IntPtr.Zero);
-
-                    // Now safely stop and free the resource.
-                    Bass.BASS_ChannelStop(_currentStreamHandle);
-                    Bass.BASS_StreamFree(_currentStreamHandle);
-
-                    // Crucially, reset the handle to 0 after freeing it.
-                    _currentStreamHandle = 0;
-                    _State = PlayState.Stopped;
-                }
-
                 _State = PlayState.Init;
 
                 try
                 {
-                    // Create the new stream.
-                    BASSFlag streamFlags = _Mixing ? (BASSFlag.BASS_STREAM_DECODE | BASSFlag.BASS_SAMPLE_FLOAT) : (BASSFlag.BASS_SAMPLE_FLOAT | BASSFlag.BASS_STREAM_AUTOFREE);
+                    // Create the new stream first. // use manual free not autofree
+                    BASSFlag streamFlags = _Mixing ? (BASSFlag.BASS_STREAM_DECODE | BASSFlag.BASS_SAMPLE_FLOAT) : BASSFlag.BASS_SAMPLE_FLOAT;
 
                     FilePath = filePath;
                     _isRadio = false;
@@ -1248,7 +1233,6 @@ namespace BassPlayer
                         _isRadio = true;
                         newStreamHandle = Bass.BASS_StreamCreateURL(filePath, 0, streamFlags, DownloadProcDelegate, IntPtr.Zero);
 
-                        // Register metadata sync
                         if (newStreamHandle != 0)
                         {
                             _tagInfo = new TAG_INFO(filePath);
@@ -1269,12 +1253,20 @@ namespace BassPlayer
                         newStreamHandle = Bass.BASS_StreamCreateFile(filePath, 0, 0, streamFlags);
                     }
 
-                    // After successfully creating a stream, assign it to the field.
+                    // After successfully creating a new stream, stop and free the old one.
                     if (newStreamHandle != 0)
                     {
+                        // Stop and free the current stream if one is playing or paused.
+                        if (_currentStreamHandle != 0)
+                        {
+                            Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
+                           // Bass.BASS_ChannelStop(_currentStreamHandle);
+                            Bass.BASS_StreamFree(_currentStreamHandle);
+
+                        }
+
                         _currentStreamHandle = newStreamHandle;
 
-                        // Add stream to mixer if needed
                         if (_Mixing)
                         {
                             BassMix.BASS_Mixer_StreamAddChannel(_mixer, _currentStreamHandle, BASSFlag.BASS_MIXER_MATRIX | BASSFlag.BASS_STREAM_AUTOFREE | BASSFlag.BASS_MIXER_NORAMPIN | BASSFlag.BASS_MIXER_BUFFER);
@@ -1283,19 +1275,23 @@ namespace BassPlayer
                     }
                     else
                     {
-                        // Handle stream creation failure gracefully.
                         BASSError error = Bass.BASS_ErrorGetCode();
                         Log.Error($"BASS: Unable to create Stream for {filePath}. Reason: {Enum.GetName(typeof(BASSError), error)}.");
                         throw new BassStreamException($"Bass Error: Unable to create stream - {Enum.GetName(typeof(BASSError), error)}", error);
                     }
 
-                    // Register callbacks for the new, active stream.
-                    RegisterPlaybackEvents(_currentStreamHandle);
+                    //RegisterPlaybackEvents(_currentStreamHandle);
 
-                    // Play the new stream.
-                    bool playbackStarted = Bass.BASS_ChannelPlay(_currentStreamHandle, false);
+                    // Clear any old syncs and store the new ones for the current stream
+                    if (_currentStreamSyncHandles != null)
+                        _currentStreamSyncHandles.Clear();
+                    _currentStreamSyncHandles = RegisterPlaybackEvents(_currentStreamHandle);
 
-                    if (playbackStarted)
+
+                    // Assign the result of the new playback attempt to the top-level 'result' variable
+                    result = Bass.BASS_ChannelPlay(_currentStreamHandle, false);
+
+                    if (result)
                     {
                         Log.Info("BASS: playback started");
                         _State = PlayState.Playing;
@@ -1308,14 +1304,11 @@ namespace BassPlayer
                         {
                             PlaybackStart(this, GetTotalStreamSeconds(_currentStreamHandle));
                         }
-                        result = true;
                     }
                     else
                     {
-                        // Handle playback start failure gracefully.
                         Bass.BASS_StreamFree(_currentStreamHandle);
                         _currentStreamHandle = 0;
-                        result = false;
                     }
                 }
                 catch (Exception ex)
@@ -1332,6 +1325,33 @@ namespace BassPlayer
                 return result;
             }
         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1538,56 +1558,27 @@ namespace BassPlayer
         /// <param name="stream"></param>
         private void FreeStream(int stream)
         {
-            int streamIndex = -1;
-
-            for (int i = 0; i < Streams.Count; i++)
+            // Unregister all known syncs for the current stream
+            if (_currentStreamSyncHandles != null)
             {
-                if (Streams[i] == stream)
+                foreach (int syncHandle in _currentStreamSyncHandles)
                 {
-                    streamIndex = i;
-                    break;
+                    Bass.BASS_ChannelRemoveSync(stream, syncHandle);
                 }
+                _currentStreamSyncHandles.Clear();
             }
 
-            if (streamIndex != -1)
+            // Now it is safe to free the stream
+            Bass.BASS_StreamFree(stream);
+
+            // Reset player state
+            if (_currentStreamHandle == stream)
             {
-                List<int> eventSyncHandles = StreamEventSyncHandles[streamIndex];
-
-                //new event synch handle to wrap
-                if (eventSyncHandles != null)
-                {
-
-
-                    foreach (int syncHandle in eventSyncHandles)
-                    {
-
-                        if (syncHandle != 0)
-                        {
-                            // wrap channel remove sync in synchandle
-                            Bass.BASS_ChannelRemoveSync(stream, syncHandle);
-                        }
-
-                    }
-
-                    // Clear the list of sync handles for the freed stream slot
-                    StreamEventSyncHandles[streamIndex].Clear();
-
-                }
-
-                }
-
-                // This is the manual FreeStream, only happens on a Next/Stop action.
-                // It's safe to call BASS_StreamFree here as the stream won't naturally end
-                // and trigger the BASS_STREAM_AUTOFREE logic.
-
-                Bass.BASS_StreamFree(stream);
-                Streams[streamIndex] = 0; // Mark the stream slot as empty
-                _CrossFading = false;
-
-                //stream = 0;
-                // _CrossFading = false; // Set crossfading to false,
-                // will update it when the next song starts
+                _currentStreamHandle = 0;
             }
+            _CrossFading = false;
+        }
+
 
         /// <summary>
         /// Is stream Playing?
@@ -1713,22 +1704,19 @@ namespace BassPlayer
         /// <param name="userData"></param>
         private void PlaybackEndProc(int handle, int stream, int data, IntPtr userData)
         {
-            Log.Debug("BASS: PlaybackEndProc of stream {0}", stream);
-
-            if (TrackPlaybackCompleted != null)
+            lock (_bassLock)
             {
-                TrackPlaybackCompleted(this, FilePath);
-            }
+                Log.Debug("BASS: PlaybackEndProc of stream {0}", stream);
 
-            // Remove the sync handle to prevent it from being called again.
-            // The stream itself will be freed by BASS_STREAM_AUTOFREE.
+                FreeStream(stream);
 
-            bool removed = Bass.BASS_ChannelRemoveSync(stream, handle);
-            if (removed)
-            {
-                Log.Debug("BassAudio: *** BASS_ChannelRemoveSync in PlaybackEndProc");
+                if (TrackPlaybackCompleted != null)
+                {
+                    TrackPlaybackCompleted(this, FilePath);
+                }
             }
         }
+
 
         /// <summary>
         /// Stream Freed Proc
@@ -1739,23 +1727,16 @@ namespace BassPlayer
         /// <param name="userData"></param>
         private void PlaybackStreamFreedProc(int handle, int stream, int data, IntPtr userData)
         {
-            //Util.Log.O("PlaybackStreamFreedProc");
-            Log.Debug("BASS: PlaybackStreamFreedProc of stream {0}", stream);
-
-            HandleSongEnded(false);
-
-            for (int i = 0; i < Streams.Count; i++)
+            lock (_bassLock)
             {
-                if (stream == Streams[i])
-                {
-                    // Set stream handle to 0, but do not call Bass.BASS_StreamFree,
-                    // as it's handled by the BASS_STREAM_AUTOFREE flag.
+                Log.Debug("BASS: PlaybackStreamFreedProc of stream {0}", stream);
 
-                    Streams[i] = 0;
-                    break;
-                }
+                HandleSongEnded(false);
             }
         }
+
+
+
 
         /// <summary>
         /// Gets the tags from the Internet Stream.
@@ -1978,33 +1959,21 @@ namespace BassPlayer
         {
             lock (_bassLock)
             {
-
                 _CrossFading = false;
-
                 int stream = GetCurrentStream();
                 Log.Debug("BASS: Stop of stream {0}", stream);
+
+                if (stream == 0)
+                {
+                    HandleSongEnded(true, songSkipped);
+                    return;
+                }
+
                 try
                 {
                     UpdateTimer.Stop();
-                    if (_SoftStop)
-                    {
-                        Bass.BASS_ChannelSlideAttribute(stream, BASSAttribute.BASS_ATTRIB_VOL, -1, 500);
-
-                        // Wait until the slide is done
-                        while (Bass.BASS_ChannelIsSliding(stream, BASSAttribute.BASS_ATTRIB_VOL))
-                            Thread.Sleep(20);
-                    }
-                    if (_Mixing)
-                    {
-                        Bass.BASS_ChannelStop(stream);
-                        BassMix.BASS_Mixer_ChannelRemove(stream);
-                    }
-                    else
-                    {
-                        Bass.BASS_ChannelStop(stream);
-                    }
-
-                    stream = 0;
+                    // This is the crucial change: use the corrected FreeStream method
+                    FreeStream(stream);
 
                     if (PlaybackStop != null)
                     {
@@ -2013,7 +1982,6 @@ namespace BassPlayer
 
                     HandleSongEnded(true, songSkipped);
                 }
-
                 catch (Exception ex)
                 {
                     Log.Error("BASS: Stop command caused an exception - {0}", ex.Message);
@@ -2023,6 +1991,9 @@ namespace BassPlayer
                 NotifyPlaying = false;
             }
         }
+
+
+
         /// <summary>
         /// Is Seeking enabled 
         /// </summary>

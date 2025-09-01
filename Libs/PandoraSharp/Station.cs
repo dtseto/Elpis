@@ -37,6 +37,7 @@ namespace PandoraSharp
 {
     public class Station : INotifyPropertyChanged
     {
+        private readonly object _playlistLock = new object(); // Add lock
         private readonly object _artLock = new object();
         private readonly Pandora _pandora;
         private byte[] _artImage;
@@ -80,7 +81,7 @@ namespace PandoraSharp
                 downloadArt = false;
             }
 
-            if (downloadArt)
+            /* if (downloadArt)
             {
                 var value = d.SelectToken("artUrl");
                 if (value != null)
@@ -104,6 +105,8 @@ namespace PandoraSharp
                 //}
                 
             }
+            */
+
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -196,54 +199,58 @@ namespace PandoraSharp
 
         private bool _gettingPlaylist = false;
         public List<Song> GetPlaylist()
-        { 
-            var results = new List<Song>();
-            if (_gettingPlaylist) return results;
-            Log.O("GetPlaylist");
-            try
+        {
+            // Use a lock to ensure only one thread can execute this at a time.
+            lock (_playlistLock)
             {
-                _gettingPlaylist = true;
-                JObject req = new JObject();
-                req["stationToken"] = IdToken;
-                if(_pandora.AudioFormat != PAudioFormat.AACPlus)
-                    req["additionalAudioUrl"] = "HTTP_128_MP3,HTTP_192_MP3";
-
-                var playlist = _pandora.CallRPC("station.getPlaylist", req, false, true); // MUST use SSL
-
-                foreach (var song in playlist.Result["items"])
+                var results = new List<Song>();
+                if (_gettingPlaylist) return results;
+                Log.O("GetPlaylist");
+                try
                 {
-                    if (song["songName"] == null) continue;
-                    try
-                    {
-                        results.Add(new Song(_pandora, song));
-                    }
-                    catch (PandoraException ex)
-                    {
-                        Log.O("Song Add Error: " + ex.FaultMessage);
-                    }
-                }
+                    _gettingPlaylist = true;
+                    JObject req = new JObject();
+                    req["stationToken"] = IdToken;
+                    if (_pandora.AudioFormat != PAudioFormat.AACPlus)
+                        req["additionalAudioUrl"] = "HTTP_128_MP3,HTTP_192_MP3";
 
-                _gettingPlaylist = false;
-                return results;
-            }
-            catch (PandoraException ex) 
-            {
-                _gettingPlaylist = false;
-                if (ex.Message == "PLAYLIST_END" || ex.Message == "DAILY_SKIP_LIMIT_REACHED")
+                    var playlist = _pandora.CallRPC("station.getPlaylist", req, false, true); // MUST use SSL
+
+                    foreach (var song in playlist.Result["items"])
+                    {
+                        if (song["songName"] == null) continue;
+                        try
+                        {
+                            results.Add(new Song(_pandora, song));
+                        }
+                        catch (PandoraException ex)
+                        {
+                            Log.O("Song Add Error: " + ex.FaultMessage);
+                        }
+                    }
+
+                    _gettingPlaylist = false;
+                    return results;
+                }
+                catch (PandoraException ex)
                 {
-                    if (ex.Message == "PLAYLIST_END")
+                    _gettingPlaylist = false;
+                    if (ex.Message == "PLAYLIST_END" || ex.Message == "DAILY_SKIP_LIMIT_REACHED")
                     {
-                        SkipLimitReached = true;
-                        SkipLimitTime = DateTime.Now;
+                        if (ex.Message == "PLAYLIST_END")
+                        {
+                            SkipLimitReached = true;
+                            SkipLimitTime = DateTime.Now;
+                        }
+                        else
+                            throw;
                     }
-                    else
-                        throw;
-                }
 
-                Log.O("Error getting playlist, will try again next time: " + Errors.GetErrorMessage(ex.Fault));
-                return results;
+                    Log.O("Error getting playlist, will try again next time: " + Errors.GetErrorMessage(ex.Fault));
+                    return results;
+                }
+            }// close lock
             }
-        }
 
         public void AddVariety(SearchResult item)
         {

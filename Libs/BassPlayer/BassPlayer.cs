@@ -195,6 +195,20 @@ namespace BassPlayer
         /// <summary>
         /// The various States for Playback
         /// </summary>
+        /// 
+        public void CheckHandleValidity(string location)
+        {
+            var dummyInfo = new BASS_CHANNELINFO();
+            // If the handle is not 0 but BASS says it's invalid, corruption has occurred.
+            if (_currentStreamHandle != 0 && !Bass.BASS_ChannelGetInfo(_currentStreamHandle, dummyInfo))
+            {
+                string errorMessage = $"CORRUPTION DETECTED at {location}: _currentStreamHandle is {_currentStreamHandle}, which is an invalid handle.";
+                Log.Error(errorMessage);
+                // This line will force the debugger to break here if it's attached.
+                System.Diagnostics.Debugger.Break();
+            }
+        }
+
         public enum PlayState
         {
             Init,
@@ -279,7 +293,9 @@ namespace BassPlayer
         private const int MAXSTREAMS = 1;
         private readonly List<int> DecoderPluginHandles = new List<int>();
         //private readonly List<List<int>> StreamEventSyncHandles = new List<List<int>>();
-        private List<int> _currentStreamSyncHandles = new List<int>();
+        //private List<int> _currentStreamSyncHandles = new List<int>();
+        private readonly Dictionary<int, List<int>> _streamSyncHandles = new Dictionary<int, List<int>>();
+
 
         private readonly List<int> Streams = new List<int>(MAXSTREAMS);
         private readonly BASSTimer UpdateTimer = new BASSTimer();
@@ -1171,6 +1187,8 @@ namespace BassPlayer
         /// <returns></returns>
         public bool Play(string filePath)
         {
+            Log.Debug($"BASS TRACE: Play() called. _currentStreamHandle is currently {_currentStreamHandle}.");
+
             lock (_bassLock)
             {
                 if (!_Initialized)
@@ -1259,9 +1277,11 @@ namespace BassPlayer
                         // Stop and free the current stream if one is playing or paused.
                         if (_currentStreamHandle != 0)
                         {
-                            Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
-                           // Bass.BASS_ChannelStop(_currentStreamHandle);
-                            Bass.BASS_StreamFree(_currentStreamHandle);
+                            //
+                            //Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
+                            // Bass.BASS_ChannelStop(_currentStreamHandle);
+                            //Bass.BASS_StreamFree(_currentStreamHandle);
+                            Stop(true); // true for songSkipped
 
                         }
 
@@ -1283,9 +1303,10 @@ namespace BassPlayer
                     //RegisterPlaybackEvents(_currentStreamHandle);
 
                     // Clear any old syncs and store the new ones for the current stream
-                    if (_currentStreamSyncHandles != null)
-                        _currentStreamSyncHandles.Clear();
-                    _currentStreamSyncHandles = RegisterPlaybackEvents(_currentStreamHandle);
+                    // removed after changing to a dictionary
+                    //if (_currentStreamSyncHandles != null)
+                    //    _currentStreamSyncHandles.Clear();
+                    //_currentStreamSyncHandles = RegisterPlaybackEvents(_currentStreamHandle);
 
 
                     // Assign the result of the new playback attempt to the top-level 'result' variable
@@ -1443,6 +1464,9 @@ namespace BassPlayer
             syncHandles.Add(RegisterPlaybackEndEvent(stream));
             syncHandles.Add(RegisterStreamFreedEvent(stream));
 
+            // Add the new list of handles to the dictionary
+            _streamSyncHandles[stream] = syncHandles;
+
             return syncHandles;
         }
 
@@ -1558,14 +1582,17 @@ namespace BassPlayer
         /// <param name="stream"></param>
         private void FreeStream(int stream)
         {
-            // Unregister all known syncs for the current stream
-            if (_currentStreamSyncHandles != null)
+            // Look up the specific sync handles for the stream being freed
+            if (_streamSyncHandles.ContainsKey(stream))
             {
-                foreach (int syncHandle in _currentStreamSyncHandles)
+                List<int> syncsForThisStream = _streamSyncHandles[stream];
+                foreach (int syncHandle in syncsForThisStream)
                 {
                     Bass.BASS_ChannelRemoveSync(stream, syncHandle);
                 }
-                _currentStreamSyncHandles.Clear();
+
+                // Remove the entry from the dictionary
+                _streamSyncHandles.Remove(stream);
             }
 
             // Now it is safe to free the stream
@@ -1575,8 +1602,11 @@ namespace BassPlayer
             if (_currentStreamHandle == stream)
             {
                 _currentStreamHandle = 0;
+                Log.Debug($"BASS TRACE: _currentStreamHandle set to 0 in FreeStream.");
+
             }
             _CrossFading = false;
+
         }
 
 
@@ -1709,7 +1739,7 @@ namespace BassPlayer
                 Log.Debug("BASS: PlaybackEndProc of stream {0}", stream);
 
                 FreeStream(stream);
-
+                CheckHandleValidity("PlaybackEndProc after FreeStream"); // Check handles
                 if (TrackPlaybackCompleted != null)
                 {
                     TrackPlaybackCompleted(this, FilePath);

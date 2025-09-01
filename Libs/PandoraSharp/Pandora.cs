@@ -63,6 +63,8 @@ namespace PandoraSharp
 
         #endregion
 
+        private readonly object _stationListLock = new object(); // Add lock
+
         private readonly object _authTokenLock = new object();
         private readonly object _partnerIDLock = new object();
         private readonly object _userIDLock = new object();
@@ -342,59 +344,62 @@ namespace PandoraSharp
             JObject req = new JObject();
             req["includeStationArtUrl"] = true;
             var stationList = CallRPC("user.getStationList", req);
-
-            QuickMixStationIDs.Clear();
-
-            Stations = new List<Station>();
-            var stations = stationList.Result["stations"];
-            foreach (JToken d in stations)
+            // Lock all modifications to the station lists
+            lock (_stationListLock)
             {
-                Stations.Add(new Station(this, d));
-            }
-            //foreach (PDict s in stationList)
-            //    Stations.Add(new Station(this, s));
 
-            if (QuickMixStationIDs.Count > 0)
-            {
-                foreach (Station s in Stations)
+                QuickMixStationIDs.Clear();
+
+                Stations = new List<Station>();
+                var stations = stationList.Result["stations"];
+                foreach (JToken d in stations)
                 {
-                    if (QuickMixStationIDs.Contains(s.ID))
-                        s.UseQuickMix = true;
+                    Stations.Add(new Station(this, d));
                 }
-            }
+                //foreach (PDict s in stationList)
+                //    Stations.Add(new Station(this, s));
 
-            List<Station> quickMixes = Stations.FindAll(x => x.IsQuickMix);
-            Stations = Stations.FindAll(x => !x.IsQuickMix);
+                if (QuickMixStationIDs.Count > 0)
+                {
+                    foreach (Station s in Stations)
+                    {
+                        if (QuickMixStationIDs.Contains(s.ID))
+                            s.UseQuickMix = true;
+                    }
+                }
 
-            switch (StationSortOrder)
-            {
-                case SortOrder.DateDesc:
-                    //Stations = Stations.OrderByDescending(x => x.ID).ToList();
-                    Stations = Stations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
-                    break;
-                case SortOrder.DateAsc:
-                    //Stations = Stations.OrderBy(x => x.ID).ToList();
-                    Stations = Stations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
-                    break;
-                case SortOrder.AlphaDesc:
-                    Stations = Stations.OrderByDescending(x => x.Name).ToList();
-                    break;
-                case SortOrder.AlphaAsc:
-                    Stations = Stations.OrderBy(x => x.Name).ToList();
-                    break;
-                case SortOrder.RatingAsc:
-                    GetStationMetaData();
-                    Stations = Stations.OrderBy(x => x.ThumbsUp).ToList();
-                    break;
-                case SortOrder.RatingDesc:
-                    GetStationMetaData();
-                    Stations = Stations.OrderByDescending(x => x.ThumbsUp).ToList();
-                    break;
+                List<Station> quickMixes = Stations.FindAll(x => x.IsQuickMix);
+                Stations = Stations.FindAll(x => !x.IsQuickMix);
 
-            }
+                switch (StationSortOrder)
+                {
+                    case SortOrder.DateDesc:
+                        //Stations = Stations.OrderByDescending(x => x.ID).ToList();
+                        Stations = Stations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
+                        break;
+                    case SortOrder.DateAsc:
+                        //Stations = Stations.OrderBy(x => x.ID).ToList();
+                        Stations = Stations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
+                        break;
+                    case SortOrder.AlphaDesc:
+                        Stations = Stations.OrderByDescending(x => x.Name).ToList();
+                        break;
+                    case SortOrder.AlphaAsc:
+                        Stations = Stations.OrderBy(x => x.Name).ToList();
+                        break;
+                    case SortOrder.RatingAsc:
+                        GetStationMetaData();
+                        Stations = Stations.OrderBy(x => x.ThumbsUp).ToList();
+                        break;
+                    case SortOrder.RatingDesc:
+                        GetStationMetaData();
+                        Stations = Stations.OrderByDescending(x => x.ThumbsUp).ToList();
+                        break;
 
-            Stations.InsertRange(0, quickMixes);
+                }
 
+                Stations.InsertRange(0, quickMixes);
+            } // end of lock
             if (StationUpdateEvent != null)
                 StationUpdateEvent(this);
         }

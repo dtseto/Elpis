@@ -36,6 +36,8 @@ namespace PandoraSharpPlayer
 {
     public class Player : INotifyPropertyChanged
     {
+        private readonly object _playbackLock = new object(); // Lock to prevent race conditions
+
         private BassAudioEngine _bass;
         private Pandora _pandora;
 
@@ -420,64 +422,70 @@ namespace PandoraSharpPlayer
 
         private void PlayNextSong(int retry = 2)
         {
-            if (!_playNext || retry < 2)
+            // Lock the entire method to prevent race conditions
+            lock (_playbackLock)
             {
-                _playNext = true;
-                Song song = null;
-                if (LoadingNextSong != null)
-                {
-                    Log.O("Loading next song.");
-                    LoadingNextSong(this);
-                }
 
-                try
+                if (!_playNext || retry < 2)
                 {
-                    song = _playlist.NextSong();
-                }
-                catch (PandoraException pex)
-                {
+                    _playNext = true;
+                    Song song = null;
+                    if (LoadingNextSong != null)
+                    {
+                        Log.O("Loading next song.");
+                        LoadingNextSong(this);
+                    }
+
+                    try
+                    {
+                        song = _playlist.NextSong();
+                    }
+                    catch (PandoraException pex)
+                    {
+                        _playNext = false;
+                        if (pex.Fault == ErrorCodes._END_OF_PLAYLIST)
+                        {
+                            Stop();
+                            return;
+                        }
+
+                        throw;
+                    }
+
+                    Log.O("Play: " + song);
+                    if (SongStarted != null)
+                        SongStarted(this, song);
+
+                    try
+                    {
+                        _bass.Play(song.AudioUrl, song.FileGain);
+                        _cqman.SendSongUpdate(song);
+                        //_cqman.SendStatusUpdate(QueryStatusValue.Playing);
+                    }
+                    catch (BassStreamException ex)
+                    {
+                        if (ex.ErrorCode == Un4seen.Bass.BASSError.BASS_ERROR_FILEOPEN)
+                        {
+                            _playlist.DoReload();
+                        }
+                        if (retry > 0)
+                            PlayNextSong(retry - 1);
+                        else
+                        {
+                            Stop();
+                            _cqman.SendStatusUpdate(QueryStatusValue.Error);
+                            throw new PandoraException(ErrorCodes.STREAM_ERROR, ex);
+                        }
+                    }
+                    finally
+                    {
+                        _playNext = false;
+                    }
+
                     _playNext = false;
-                    if (pex.Fault == ErrorCodes._END_OF_PLAYLIST)
-                    {
-                        Stop();
-                        return;
-                    }
-
-                    throw;
                 }
 
-                Log.O("Play: " + song);
-                if (SongStarted != null)
-                    SongStarted(this, song);
-
-                try
-                {
-                    _bass.Play(song.AudioUrl, song.FileGain);
-                    _cqman.SendSongUpdate(song);
-                    //_cqman.SendStatusUpdate(QueryStatusValue.Playing);
-                }
-                catch (BassStreamException ex)
-                {
-                    if (ex.ErrorCode == Un4seen.Bass.BASSError.BASS_ERROR_FILEOPEN)
-                    {
-                        _playlist.DoReload();
-                    }
-                    if (retry > 0)
-                        PlayNextSong(retry - 1);
-                    else
-                    {
-                        Stop();
-                        _cqman.SendStatusUpdate(QueryStatusValue.Error);
-                        throw new PandoraException(ErrorCodes.STREAM_ERROR, ex);
-                    }
-                }
-                finally
-                {
-                    _playNext = false;
-                }
-
-                _playNext = false; 
-            }
+            } //close lock
         }
 
         public void SeekToTime(int percentage)
@@ -916,6 +924,8 @@ namespace PandoraSharpPlayer
         private void bass_PlaybackStateChanged(object sender, BassAudioEngine.PlayState oldState,
                                                BassAudioEngine.PlayState newState)
         {
+            _bass.CheckHandleValidity("Start of bass_PlaybackStateChanged"); // check handles
+
             if (PlaybackStateChanged != null) PlaybackStateChanged(this, oldState, newState);
 
             Log.O("Playstate: " + newState);

@@ -94,8 +94,10 @@ namespace BassPlayer
 
         public override void OnStopped()
         {
+            // Unlinking is fine, but do NOT manually free the stream.
             Bass.BASS_ChannelRemoveLink(base.ChannelHandle, _stream);
-            Bass.BASS_StreamFree(_stream);
+            // The line below has been removed.
+            // Bass.BASS_StreamFree(_stream);
             _stream = 0;
             ClearBuffer();
         }

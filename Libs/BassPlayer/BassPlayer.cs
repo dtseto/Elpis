@@ -190,6 +190,10 @@ namespace BassPlayer
         // new basslock
         private readonly object _bassLock = new object();
 
+        // NEW DELEGATE AND EVENT near the top of the class
+       // public delegate void TrackPlaybackCompletedHandler(object sender, string filePath);
+      //  public event TrackPlaybackCompletedHandler TrackPlaybackCompleted;
+
         #region Enums
 
         /// <summary>
@@ -714,7 +718,8 @@ namespace BassPlayer
                 //StreamEventSyncHandles.Add(new List<int>());
                 //StreamEventSyncHandles.Add(new List<int>());
 
-                LoadAudioDecoderPlugins();
+                // remove load audio decoder plugins for newer Windows 10 and 11 OS since they have AAC support
+                //LoadAudioDecoderPlugins();
 
                 Log.Info("BASS: Initializing BASS environment done.");
 
@@ -877,19 +882,22 @@ namespace BassPlayer
                 _BufferingMS = 8000;
             }
 
+            // Change: Force crossfade to be disabled.
             _CrossFadeIntervalMS = 0; //xmlreader.GetValueAsInt("audioplayer", "crossfade", 4000);
+            _DefaultCrossFadeIntervalMS = 0;
+            _playBackType = (int)PlayBackType.NORMAL;
 
-            if (_CrossFadeIntervalMS < 0)
-            {
-                _CrossFadeIntervalMS = 0;
-            }
+            //if (_CrossFadeIntervalMS < 0)
+            //{
+            //    _CrossFadeIntervalMS = 0;
+            //}
 
-            else if (_CrossFadeIntervalMS > 16000)
-            {
-                _CrossFadeIntervalMS = 16000;
-            }
+            //else if (_CrossFadeIntervalMS > 16000)
+            //{
+            //    _CrossFadeIntervalMS = 16000;
+            //}
 
-            _DefaultCrossFadeIntervalMS = _CrossFadeIntervalMS;
+            //_DefaultCrossFadeIntervalMS = _CrossFadeIntervalMS;
 
             _SoftStop = true; //xmlreader.GetValueAsBool("audioplayer", "fadeOnStartStop", true);
 
@@ -897,23 +905,23 @@ namespace BassPlayer
 
             bool doGaplessPlayback = false; //xmlreader.GetValueAsBool("audioplayer", "gaplessPlayback", false);
 
-            if (doGaplessPlayback)
-            {
-                _CrossFadeIntervalMS = 200;
-                _playBackType = (int) PlayBackType.GAPLESS;
-            }
-            else
-            {
-                if (_CrossFadeIntervalMS == 0)
-                {
-                    _playBackType = (int) PlayBackType.NORMAL;
-                    _CrossFadeIntervalMS = 100;
-                }
-                else
-                {
-                    _playBackType = (int) PlayBackType.CROSSFADE;
-                }
-            }
+            //if (doGaplessPlayback)
+            //{
+               // _CrossFadeIntervalMS = 200;
+              //  _playBackType = (int) PlayBackType.GAPLESS;
+            //}
+            //else
+            //{
+                //if (_CrossFadeIntervalMS == 0)
+                //{
+                 //   _playBackType = (int) PlayBackType.NORMAL;
+                 //   _CrossFadeIntervalMS = 100;
+                //}
+               // else
+               // {
+              //      _playBackType = (int) PlayBackType.CROSSFADE;
+              //  }
+            //}
             //}
         }
 
@@ -1187,6 +1195,7 @@ namespace BassPlayer
         /// <returns></returns>
         public bool Play(string filePath)
         {
+            //Log the handle value at the start of the method.
             Log.Debug($"BASS TRACE: Play() called. _currentStreamHandle is currently {_currentStreamHandle}.");
 
             lock (_bassLock)
@@ -1287,6 +1296,9 @@ namespace BassPlayer
 
                         _currentStreamHandle = newStreamHandle;
 
+                        //Log the new handle value after it has been assigned.
+                        Log.Debug($"BASS TRACE: New stream created with handle: {_currentStreamHandle}");
+
                         if (_Mixing)
                         {
                             BassMix.BASS_Mixer_StreamAddChannel(_mixer, _currentStreamHandle, BASSFlag.BASS_MIXER_MATRIX | BASSFlag.BASS_STREAM_AUTOFREE | BASSFlag.BASS_MIXER_NORAMPIN | BASSFlag.BASS_MIXER_BUFFER);
@@ -1308,6 +1320,8 @@ namespace BassPlayer
                     //    _currentStreamSyncHandles.Clear();
                     //_currentStreamSyncHandles = RegisterPlaybackEvents(_currentStreamHandle);
 
+                    // fix add this back Register the playback events for the newly created stream.
+                    RegisterPlaybackEvents(_currentStreamHandle);
 
                     // Assign the result of the new playback attempt to the top-level 'result' variable
                     result = Bass.BASS_ChannelPlay(_currentStreamHandle, false);
@@ -1602,7 +1616,8 @@ namespace BassPlayer
             if (_currentStreamHandle == stream)
             {
                 _currentStreamHandle = 0;
-                Log.Debug($"BASS TRACE: _currentStreamHandle set to 0 in FreeStream.");
+                //More explicit logging to confirm the reset.
+                Log.Debug($"BASS TRACE: Handle for stream {stream} has been freed. _currentStreamHandle is now 0.");
 
             }
             _CrossFading = false;
@@ -1740,10 +1755,13 @@ namespace BassPlayer
 
                 FreeStream(stream);
                 CheckHandleValidity("PlaybackEndProc after FreeStream"); // Check handles
+
+                // CHANGE: Invoke the new event to notify the Player class
                 if (TrackPlaybackCompleted != null)
                 {
                     TrackPlaybackCompleted(this, FilePath);
                 }
+
             }
         }
 

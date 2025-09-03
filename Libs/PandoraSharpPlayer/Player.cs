@@ -164,6 +164,11 @@ namespace PandoraSharpPlayer
             _bass.PlaybackStateChanged += bass_PlaybackStateChanged;
             _bass.PlaybackStart += bass_PlaybackStart;
             _bass.PlaybackStop += bass_PlaybackStop;
+
+
+            // Subscribe to the new delegate event
+            _bass.TrackPlaybackCompleted += _bass_TrackPlaybackCompleted;
+
             _bass.InitBass();
 
             _playlist = new Playlist();
@@ -177,6 +182,16 @@ namespace PandoraSharpPlayer
 
             LoggedIn = false;
             return true;
+        }
+
+        // ADD THIS ENTIRE NEW METHOD
+        void _bass_TrackPlaybackCompleted(object sender, string filePath)
+        {
+            if (CurrentStation != null)
+            {
+                Log.O("Track completed, playing next song.");
+                RunTask(() => PlayNextSong());
+            }
         }
 
         public string OutputDevice
@@ -938,11 +953,13 @@ namespace PandoraSharpPlayer
             else if (Paused) _cqman.SendStatusUpdate(QueryStatusValue.Paused);
             else if (Stopped) _cqman.SendStatusUpdate(QueryStatusValue.Stopped);
 
-            if (newState == BassAudioEngine.PlayState.Ended && CurrentStation != null)
-            {
-                Log.O("Song ended, playing next song.");
-                RunTask(() => PlayNextSong());
-            }
+            // REMOVE THIS ENTIRE IF BLOCK to prevent the race condition
+            //if (newState == BassAudioEngine.PlayState.Ended && CurrentStation != null)
+            //{
+            //    Log.O("Song ended, playing next song.");
+            //    RunTask(() => PlayNextSong());
+            //}
+
         }
 
         private void bass_PlaybackStart(object sender, double duration)

@@ -75,7 +75,7 @@ Afraid you might not have .NET 4.0 or don’t know what it is? No worries, if yo
 
 ## Download
 
-To download the latest version of Elpis, click here: [Elpis Releases](https://github.com/adammhaile/Elpis/releases)
+To download the latest version of Elpis, click on right.
 
 ## Other Links
  * [Pithos](http://kevinmehall.net/p/pithos/) (Linux Gnome client)

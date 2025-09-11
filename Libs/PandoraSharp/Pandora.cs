@@ -186,11 +186,11 @@ namespace PandoraSharp
         public event LoginStatusEventHandler LoginStatusEvent;
         public event QuickMixSavedEventHandler QuickMixSavedEvent;
 
-        protected internal string RPCRequest(string url, string data)
+        protected internal async Task<string> RPCRequest(string url, string data)
         {
             try
             {
-                return PRequest.StringRequest(url, data);
+                return await PRequest.StringRequest(url, data);
             }
             catch (Exception e)
             {
@@ -218,7 +218,7 @@ namespace PandoraSharp
             return true; //no fault
         }
 
-        protected internal string CallRPC_Internal(string method, JObject request, 
+        protected internal async Task<string> CallRPC_Internal(string method, JObject request,
             bool isAuth, bool useSSL = false)
         {
             int callID = 0;
@@ -227,14 +227,14 @@ namespace PandoraSharp
                 callID = _rpcCount++;
             }
 
-            string shortMethod = (method.Contains("&") ? 
+            string shortMethod = (method.Contains("&") ?
                 method.Substring(0, method.IndexOf("&")) : method);
 
             string url = (useSSL || _forceSSL ? "https://" : "http://") + Const.RPC_URL + "?method=" + method;
 
             if (request == null) request = new JObject();
 
-            if(AuthToken != null && 
+            if (AuthToken != null &&
                 PartnerID != null)
             {
                 //if (!url.EndsWith("?")) url += "?";
@@ -251,7 +251,7 @@ namespace PandoraSharp
 
             string json = request.ToString();
             string data = string.Empty;
-            if(method == "auth.partnerLogin")
+            if (method == "auth.partnerLogin")
                 data = json;
             else
                 data = Crypto.out_key.Encrypt(json);
@@ -277,28 +277,28 @@ namespace PandoraSharp
                 }
             }
 
-            string response = RPCRequest(url, data);
+            string response = await RPCRequest(url, data);
             Log.O("[" + callID + ":response]: " + response.SanitizeJSON());
             return response;
         }
 
-        protected internal JSONResult CallRPC(string method, JObject request = null, 
+        protected internal async Task<JSONResult> CallRPC(string method, JObject request = null,
                                           bool isAuth = false, bool useSSL = false)
         {
-            string response = CallRPC_Internal(method, request, isAuth, useSSL);
+            string response = await CallRPC_Internal(method, request, isAuth, useSSL);
             JSONResult result = new JSONResult(response);
             if (result.Fault)
             {
                 if (!HandleFaults(result, false))
                 {
                     Log.O("Reauth Required");
-                    if (!AuthenticateUser())
+                    if (!await AuthenticateUser())
                     {
                         HandleFaults(result, true);
                     }
                     else
                     {
-                        response = CallRPC_Internal(method, request, isAuth, useSSL);
+                        response = await CallRPC_Internal(method, request, isAuth, useSSL);
                         HandleFaults(result, true);
                     }
                 }
@@ -307,18 +307,18 @@ namespace PandoraSharp
             return result;
         }
 
-        protected internal JSONResult CallRPC(string method, params object[] args)
+        protected internal async Task<JSONResult> CallRPC(string method, params object[] args)
         {
             JObject req = new JObject();
             if (args.Length % 2 != 0)
             {
                 Log.O("CallRPC: Called with an uneven number of arguments!");
                 return null;
-            } 
+            }
 
-            for (int i=0; i < args.Length; i+=2)
+            for (int i = 0; i < args.Length; i += 2)
             {
-                if(args[i].GetType() != typeof(string) || args[i].GetType() != typeof(String))
+                if (args[i].GetType() != typeof(string) || args[i].GetType() != typeof(String))
                 {
                     Log.O("CallRPC: Called with an incorrect parameter type!");
                     return null;
@@ -326,7 +326,7 @@ namespace PandoraSharp
                 req[(string)args[i]] = JToken.FromObject(args[i + 1]);
             }
 
-            return CallRPC(method, req);
+            return await CallRPC(method, req);
         }
 
         protected internal object CallRPC(string method, object[] args, bool b_url_args = false,
@@ -335,7 +335,7 @@ namespace PandoraSharp
             return null;
         }
 
-        public void RefreshStations()
+        public async Task RefreshStations()
         {
             Log.O("RefreshStations");
             if (StationsUpdatingEvent != null)
@@ -343,7 +343,7 @@ namespace PandoraSharp
 
             JObject req = new JObject();
             req["includeStationArtUrl"] = true;
-            var stationList = CallRPC("user.getStationList", req);
+            var stationList = await CallRPC("user.getStationList", req);
             // Lock all modifications to the station lists
             lock (_stationListLock)
             {
@@ -458,7 +458,7 @@ namespace PandoraSharp
             return _syncTime + (Time.Unix() - _timeSynced);
         }
 
-        public bool AuthenticateUser()
+        public async Task<bool> AuthenticateUser()
         {
             _authorizing = true;
 
@@ -482,7 +482,7 @@ namespace PandoraSharp
 
             try
             {
-                ret = CallRPC("auth.partnerLogin", req, true, true);
+                ret = await CallRPC("auth.partnerLogin", req, true, true);
                 if (ret.Fault)
                 {
                     Log.O("PartnerLogin Error: " + ret.FaultString);
@@ -520,7 +520,7 @@ namespace PandoraSharp
 
             ret = null;
 
-            ret = CallRPC("auth.userLogin", req, true, true);
+            ret = await CallRPC("auth.userLogin", req, true, true);
             if (ret.Fault)
             {
                 Log.O("UserLogin Error: " + ret.FaultString);
@@ -542,7 +542,7 @@ namespace PandoraSharp
                 LoginStatusEvent(this, status);
         }
 
-        public void Connect(string user, string password)
+        public async Task Connect(string user, string password)
         {
             Log.O("Connect");
             ErrorCodes status = ErrorCodes.SUCCESS;
@@ -554,12 +554,12 @@ namespace PandoraSharp
             try
             {
                 SendLoginStatus("Authenticating user:\r\n" + user);
-                _connected = AuthenticateUser();
+                _connected = await AuthenticateUser();
 
                 if (_connected)
                 {
                     SendLoginStatus("Loading station list...");
-                    RefreshStations();
+                    await RefreshStations();
                 }
                 else
                 {
@@ -619,12 +619,12 @@ namespace PandoraSharp
                 QuickMixSavedEvent(this);
         }
 
-        public List<SearchResult> Search(string query)
+        public async Task<List<SearchResult>> Search(string query)
         {
             Log.O("Search: " + query);
             JObject req = new JObject();
             req["searchText"] = query;
-            var search = CallRPC("music.search", req);
+            var search = await CallRPC("music.search", req);
 
             var list = new List<SearchResult>();
             var artists = search.Result["artists"];
@@ -640,11 +640,11 @@ namespace PandoraSharp
             return list;
         }
 
-        public Station CreateStationFromSearch(string token)
+        public async Task<Station> CreateStationFromSearch(string token)
         {
             JObject req = new JObject();
             req["musicToken"] = token;
-            var result = CallRPC("station.createStation", req);
+            var result = await CallRPC("station.createStation", req);
 
             var station = new Station(this, result.Result);
             Stations.Add(station);
@@ -652,12 +652,12 @@ namespace PandoraSharp
             return station;
         }
 
-        private Station CreateStation(Song song, string type)
+        private async Task<Station> CreateStation(Song song, string type)
         {
             JObject req = new JObject();
             req["trackToken"] = song.TrackToken;
             req["musicType"] = type;
-            var result = CallRPC("station.createStation", req);
+            var result = await CallRPC("station.createStation", req);
 
             var station = new Station(this, result.Result);
             Stations.Add(station);
@@ -665,36 +665,38 @@ namespace PandoraSharp
             return station;
         }
 
-        private void GetStationMetaData()
+        private async Task GetStationMetaData()
         {
             Log.O("RetrieveStationMetaData");
 
-            Parallel.ForEach(Stations, station =>
+            foreach (var station in Stations)
             {
-                JObject req = new JObject();
+                JObject req = new JObject
+                {
+                    ["stationToken"] = station.IdToken,
+                    ["includeExtendedAttributes"] = true
+                };
 
-                req["stationToken"] = station.IdToken;
-                req["includeExtendedAttributes"] = true;
-                var stationInfo = CallRPC("station.getStation", req);
-
+                var stationInfo = await CallRPC("station.getStation", req);
                 var feedback = stationInfo.Result["feedback"];
 
                 station.ThumbsUp = Convert.ToInt32(feedback["totalThumbsUp"].ToString());
                 station.ThumbsDown = Convert.ToInt32(feedback["totalThumbsDown"].ToString());
-            });
-        } 
-
-        public Station CreateStationFromSong(Song song)
-        {
-            return CreateStation(song, "song");
+            }
         }
 
-        public Station CreateStationFromArtist(Song song)
+
+        public async Task<Station> CreateStationFromSong(Song song)
         {
-            return CreateStation(song, "artist");
+            return await CreateStation(song, "song");
         }
 
-        public void AddFeedback(string stationToken, string trackToken, SongRating rating)
+        public async Task<Station> CreateStationFromArtist(Song song)
+        {
+            return await CreateStation(song, "artist");
+        }
+
+        public async Task AddFeedback(string stationToken, string trackToken, SongRating rating)
         {
             Log.O("AddFeedback");
 
@@ -705,18 +707,26 @@ namespace PandoraSharp
             req["trackToken"] = trackToken;
             req["isPositive"] = rate;
 
-            CallRPC("station.addFeedback", req);
+            // Await so exceptions bubble correctly
+            await CallRPC("station.addFeedback", req);
         }
 
-        public void DeleteFeedback(string feedbackID)
+        public async Task DeleteFeedback(string feedbackID)
         {
             Log.O("DeleteFeedback");
 
-            object result = CallRPC("station.deleteFeedback", "feedbackId", feedbackID);
+            if (string.IsNullOrWhiteSpace(feedbackID))
+                throw new ArgumentException("feedbackID is required.", nameof(feedbackID));
+
+            var req = new JObject { ["feedbackId"] = feedbackID };
+
+            // Await so exceptions bubble correctly
+            await CallRPC("station.deleteFeedback", req).ConfigureAwait(false);
         }
 
         public void CallFeedbackUpdateEvent(Song song, bool success)
         {
+
             if (FeedbackUpdateEvent != null)
                 FeedbackUpdateEvent(this, song, success);
         }
@@ -732,15 +742,26 @@ namespace PandoraSharp
             return null;
         }
 
-        public string GetFeedbackID(string stationToken, string trackToken)
-        {
-            JObject req = new JObject();
-            req["stationToken"] = stationToken;
-            req["trackToken"] = trackToken;
-            req["isPositive"] = true;
 
-            var feedback = CallRPC("station.addFeedback", req);
+        // NOTE: Despite its name, this ADDS positive feedback and returns the new feedbackId.
+        public async Task<string> GetFeedbackID(string stationToken, string trackToken)
+        {
+            if (string.IsNullOrWhiteSpace(stationToken))
+                throw new ArgumentException("stationToken is required.", nameof(stationToken));
+            if (string.IsNullOrWhiteSpace(trackToken))
+                throw new ArgumentException("trackToken is required.", nameof(trackToken));
+
+            var req = new JObject
+            {
+                ["stationToken"] = stationToken,
+                ["trackToken"] = trackToken,
+                ["isPositive"] = true
+            };
+
+            var feedback = await CallRPC("station.addFeedback", req).ConfigureAwait(false);
             return (string)feedback.Result["feedbackId"];
         }
+
+
     }
 }

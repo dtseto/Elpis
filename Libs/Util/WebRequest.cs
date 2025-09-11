@@ -18,11 +18,12 @@
 */
 
 using System;
+using System.ComponentModel;
 using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
-using System.ComponentModel;
+using System.Threading.Tasks;
 
 namespace Util
 {
@@ -54,31 +55,33 @@ namespace Util
             _proxy = p;
         }
 
-        public static string StringRequest(string url, string data)
+        public static async Task<string> StringRequest(string url, string data)
         {
-            var wc = new WebClient();
-            if (_proxy != null)
-                wc.Proxy = _proxy;
-
-            wc.Encoding = System.Text.Encoding.UTF8;
-            wc.Headers.Add("Content-Type", "text/plain; charset=UTF-8");
-            wc.Headers.Add("User-Agent", _userAgent);
-
-            string response = string.Empty;
-            try
+            using (var wc = new WebClient())
             {
-                response = wc.UploadString(new Uri(url), "POST", data);
-            }
-            catch (WebException wex)
-            {
-                Log.O("StringRequest Error: " + wex.ToString());
-                //Wait and Try again, just in case
-                Thread.Sleep(500);
-                response = wc.UploadString(new Uri(url), "POST", data);
-            }
+                if (_proxy != null)
+                    wc.Proxy = _proxy;
 
-            //Log.O(response);
-            return response;
+                wc.Encoding = System.Text.Encoding.UTF8;
+                wc.Headers.Add("Content-Type", "text/plain; charset=UTF-8");
+                wc.Headers.Add("User-Agent", _userAgent);
+
+                string response = string.Empty;
+                try
+                {
+                    response = await wc.UploadStringTaskAsync(new Uri(url), "POST", data);
+                }
+                catch (WebException wex)
+                {
+                    Log.O("StringRequest Error: " + wex.ToString());
+                    //Wait and Try again, just in case
+                    await Task.Delay(500);
+                    response = await wc.UploadStringTaskAsync(new Uri(url), "POST", data);
+                }
+
+                //Log.O(response);
+                return response;
+            }
         }
 
         public static void ByteRequestAsync(string url, DownloadDataCompletedEventHandler dataHandler)
@@ -114,6 +117,7 @@ namespace Util
             DownloadProgressChangedEventHandler progressCallback,
             AsyncCompletedEventHandler completeCallback)
         {
+
             var wc = new WebClient();
             if (_proxy != null)
                 wc.Proxy = _proxy;

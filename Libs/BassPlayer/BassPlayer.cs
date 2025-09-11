@@ -761,8 +761,21 @@ namespace BassPlayer
         {
             try
             {
+                // Check if BASS is already initialized
+                if (_Initialized && !_BassFreed)
+                {
+                    Log.Warn("BASS: Initialization skipped as BASS is already initialized.");
+                    return;
+                }
+
                 Log.Info("BASS: Initializing BASS audio engine...");
                 bool initOK = false;
+
+                // Free BASS if it was previously initialized but not freed
+                if (_Initialized && _BassFreed)
+                {
+                    FreeBass();
+                }
 
                 Bass.BASS_SetConfig(BASSConfig.BASS_CONFIG_DEV_DEFAULT, true); //Allows following Default device (Win 7 Only)
                 int soundDevice = GetSoundDevice();

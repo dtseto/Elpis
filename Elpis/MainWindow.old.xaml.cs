@@ -809,7 +809,7 @@ namespace Elpis
 
                 try
                 {
-                    post.Send();
+            await Task.Run(() => post.Send()); // Send analytics data asynchronously
                 }
                 catch(Exception ex)
                 {
@@ -822,8 +822,8 @@ namespace Elpis
             try
             {
                 _player = new Player();
-                _player.Initialize(_bassRegEmail, _bassRegKey); //TODO - put this in the login sequence?
-                if(_config.Fields.Proxy_Address != string.Empty)
+                await Task.Run(() => _player.Initialize(_bassRegEmail, _bassRegKey)); // Initialize player asynchronously
+                if (_config.Fields.Proxy_Address != string.Empty)
                     _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
                         _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
                 setOutputDevice(_config.Fields.System_OutputDevice);
@@ -834,7 +834,7 @@ namespace Elpis
                 return;
             }
 
-            LoadLastFM();
+            await Task.Run(LoadLastFM); // Load LastFM asynchronously
 
             _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
             _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
@@ -852,11 +852,12 @@ namespace Elpis
 
             _loadingPage.UpdateStatus("Starting Web Server...");
 
-            StartWebServer();
+            await Task.Run(StartWebServer); // Start the web server asynchronously
 
             _loadingPage.UpdateStatus("Setting up UI...");
 
-            this.Dispatch(() => {
+            await Dispatcher.InvokeAsync(() =>
+            {
                 _keyHost = new HotKeyHost(this);
                 ConfigureHotKeys();
             });
@@ -1029,20 +1030,22 @@ namespace Elpis
             _player.RegisterPlayerControlQuery(_scrobbler);
         }
 
-        private void LoadLogic()
+        private async Task LoadLogic()
         {
             bool foundNewUpdate = false;
-            if (InitLogic())
+
+            if (await Task.Run(()=> (InitLogic())) //run initlogic asynchronously
             {
 #if APP_RELEASE
                 _update = new UpdateCheck();
                 if (_config.Fields.Elpis_CheckUpdates)
                 {
                     _loadingPage.UpdateStatus("Checking for updates...");
-                    if (_update.CheckForUpdate())
+                    if (await Task.run(() => _update.CheckForUpdate()) // check for update
                     {
                         foundNewUpdate = true;
-                        this.BeginDispatch(() =>
+                        await Dispatcher. InvokeAsync(() => 
+                        //this.BeginDispatch(() =>
                                                {
                                                    _updatePage = new UpdatePage(_update);
                                                    _updatePage.UpdateSelectionEvent += _updatePage_UpdateSelectionEvent;
@@ -1054,10 +1057,11 @@ namespace Elpis
                 if (_config.Fields.Elpis_CheckBetaUpdates && !foundNewUpdate)
                 {
                     _loadingPage.UpdateStatus("Checking for Beta updates...");
-                    if (_update.CheckForBetaUpdate())
+            if (await Task.Run(() => _update.CheckForBetaUpdate())) // Check for beta updates asynchronously
+
                     {
                         foundNewUpdate = true;
-                        this.BeginDispatch(() =>
+                await Dispatcher.InvokeAsync(() =>
                         {
                             _updatePage = new UpdatePage(_update);
                             _updatePage.UpdateSelectionEvent += _updatePage_UpdateSelectionEvent;
@@ -1070,15 +1074,15 @@ namespace Elpis
                 {
                     if (!foundNewUpdate)
                     {
-                        FinalLoad();
+                        await FinalLoad();
                     }
                 }
                 else
                 {
-                    FinalLoad();
+                    await FinalLoad();
                 }
 #else
-                FinalLoad();
+                await FinalLoad();
 #endif
             }
         }

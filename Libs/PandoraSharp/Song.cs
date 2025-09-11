@@ -26,6 +26,9 @@ using System.Collections.Generic;
 using System.Xml.Serialization;
 using System.Web.Script.Serialization;
 using System.Windows;
+using System.Threading.Tasks;
+
+
 
 namespace PandoraSharp
 {
@@ -213,7 +216,7 @@ namespace PandoraSharp
             get { return _pandora.GetStationByID(StationID); }
         }
 
-        private string FeedbackID
+        public Task<string> FeedbackID
         {
             get { return _pandora.GetFeedbackID(StationID, TrackToken); }
         }
@@ -232,7 +235,7 @@ namespace PandoraSharp
             AlbumImage = e.Result;
         }
 
-        public void Rate(SongRating rating)
+        public async Task Rate(SongRating rating)
         {
             if (Rating != rating)
             {
@@ -240,9 +243,12 @@ namespace PandoraSharp
                 {
                     Station.TransformIfShared();
                     if (rating == SongRating.none)
-                        _pandora.DeleteFeedback(FeedbackID);
+                    {
+                        var id = await FeedbackID; // await Task<string>
+                        await _pandora.DeleteFeedback(id);
+                    }
                     else
-                        _pandora.AddFeedback(Station.IdToken, TrackToken, rating);
+                        await _pandora.AddFeedback(Station.IdToken, TrackToken, rating);
 
                     Rating = rating;
                     _pandora.CallFeedbackUpdateEvent(this, true);

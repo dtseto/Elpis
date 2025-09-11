@@ -766,9 +766,9 @@ namespace PandoraSharpPlayer
 
         public void StationSearchNew(string query)
         {
-            RunTask(() =>
+            RunTask(async () =>
                         {
-                            List<SearchResult> result = _pandora.Search(query);
+                            List<SearchResult> result = await _pandora.Search(query);
                             if (SearchResult != null)
                                 SearchResult(this, result);
                         });
@@ -776,9 +776,9 @@ namespace PandoraSharpPlayer
 
         public void CreateStationFromSong(Song song)
         {
-            RunTask(() =>
+            RunTask(async () =>
             {
-                Station station = _pandora.CreateStationFromSong(song);
+                Station station = await _pandora.CreateStationFromSong(song);
                 if (StationCreated != null)
                     StationCreated(this, station);
             });
@@ -786,9 +786,9 @@ namespace PandoraSharpPlayer
 
         public void CreateStationFromArtist(Song song)
         {
-            RunTask(() =>
+            RunTask(async () =>
             {
-                Station station = _pandora.CreateStationFromArtist(song);
+                Station station = await _pandora.CreateStationFromArtist(song);
                 if (StationCreated != null)
                     StationCreated(this, station);
             });
@@ -796,9 +796,9 @@ namespace PandoraSharpPlayer
 
         public void CreateStation(SearchResult result)
         {
-            RunTask(() =>
+            RunTask(async () =>
                         {
-                            Station station = _pandora.CreateStationFromSearch(result.MusicToken);
+                            Station station = await _pandora.CreateStationFromSearch(result.MusicToken);
                             if (StationCreated != null)
                                 StationCreated(this, station);
                         });

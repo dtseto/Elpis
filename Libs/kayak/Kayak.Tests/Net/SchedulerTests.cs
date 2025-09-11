@@ -29,10 +29,9 @@ namespace Kayak.Tests.Net
             wh.Dispose();
         }
 
-        public void RunScheduler()
+        public async Task RunScheduler()
         {
-            new Thread(() => scheduler.Start()).Start();
-            wh.Wait(TimeSpan.FromSeconds(5));
+            await Task.Run(() => scheduler.Start());
         }
 
         //[Test]

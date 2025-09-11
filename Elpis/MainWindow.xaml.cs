@@ -1,32 +1,34 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Forms;
-using System.Windows.Input;
-using BassPlayer;
+﻿using BassPlayer;
 using Elpis.Hotkeys;
 using Elpis.UpdateSystem;
 using GUI.BorderlessWindow;
 using GUI.PageTransition;
+using MaterialDesignColors;
+using Microsoft.WindowsAPICodePack.Taskbar;
 using NDesk.Options;
 using PandoraSharp;
+using PandoraSharp.Plugins;
 using PandoraSharpPlayer;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Forms;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media.Media3D;
+using System.Windows.Shell;
 using Util;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.Window;
 using Log = Util.Log;
 using UserControl = System.Windows.Controls.UserControl;
-using PandoraSharp.Plugins;
-using System.Windows.Interop;
-using Microsoft.WindowsAPICodePack.Taskbar;
-using System.Windows.Shell;
-using System.Windows.Controls;
-using MaterialDesignColors;
-using System.Linq;
 //Background="#191c1f"
 
 namespace Elpis
@@ -151,18 +153,25 @@ namespace Elpis
         {
             InitializeComponent();
 
+            // Initialize UI components
+            new WindowResizer(this);
+
+
             TitleBar.MouseLeftButtonDown += ((o, e) => DragMove());
+
+            MinimizeButton.MouseLeftButtonDown += ((o, e) => WindowState = WindowState.Minimized);
+            CloseButton.MouseLeftButtonDown += ((o, e) => Close());
 
             _errorPage = new ErrorPage();
             _errorPage.ErrorClose += _errorPage_ErrorClose;
-            //transitionControl.AddPage(_errorPage);
+            //transitionControl.ShowPage(_errorPage);
 
             _loadingPage = new LoadingPage();
-            //transitionControl.AddPage(_loadingPage);
+            //transitionControl.ShowPage(_loadingPage);
 
             _update = new UpdateCheck();
 
-            ShowPage(_loadingPage);
+            //transitionControl.ShowPage(_loadingPage);
 
             _config = new Config(_configLocation ?? "");
 
@@ -172,26 +181,15 @@ namespace Elpis
             }
             else
             {
-                if (_config.Fields.Proxy_Address != string.Empty)
-                    PRequest.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-                        _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
-                SwatchesProvider swatchesProvider = new SwatchesProvider();
 
-                Swatch color = swatchesProvider.Swatches.FirstOrDefault(a => a.Name == _config.Fields.Current_Color);
-                if(color != null) new PaletteHelper().ReplacePrimaryColor(color);
+                // Set window location and size
                 var loc = _config.Fields.Elpis_StartupLocation;
                 var size = _config.Fields.Elpis_StartupSize;
 
                 if (loc.X != -1 && loc.Y != -1)
                 {
-                    // Bug Fix: Issue #54, make sure that the initial window location is
-                    // always fully within the virtual screen bounds.
-                    // Unfortunately may not preserve window location when primary display is not left most
-                    // but it eliminates the missing window problem in most situations.
-                    this.Left = Math.Max(0, Math.Min(loc.X,
-                        SystemParameters.VirtualScreenWidth - this.ActualWidth));
-                    this.Top = Math.Max(0, Math.Min(loc.Y,
-                        SystemParameters.VirtualScreenHeight - this.ActualHeight));
+                    this.Left = Math.Max(0, Math.Min(loc.X, SystemParameters.VirtualScreenWidth - this.ActualWidth));
+                    this.Top = Math.Max(0, Math.Min(loc.Y, SystemParameters.VirtualScreenHeight - this.ActualHeight));
                 }
 
                 if (size.Width != 0 && size.Height != 0)
@@ -200,10 +198,54 @@ namespace Elpis
                     this.Height = size.Height;
                 }
             }
+
+
+            //if (_config.Fields.Proxy_Address != string.Empty)
+              //      PRequest.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
+              //          _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
+              //  SwatchesProvider swatchesProvider = new SwatchesProvider();
+
+                //Swatch color = swatchesProvider.Swatches.FirstOrDefault(a => a.Name == _config.Fields.Current_Color);
+           //     if(color != null) new PaletteHelper().ReplacePrimaryColor(color);
+               // var loc = _config.Fields.Elpis_StartupLocation;
+               // var size = _config.Fields.Elpis_StartupSize;
+
+              //  if (loc.X != -1 && loc.Y != -1)
+               // {
+                    // Bug Fix: Issue #54, make sure that the initial window location is
+                    // always fully within the virtual screen bounds.
+                    // Unfortunately may not preserve window location when primary display is not left most
+                    // but it eliminates the missing window problem in most situations.
+                 //   this.Left = Math.Max(0, Math.Min(loc.X,
+                 //       SystemParameters.VirtualScreenWidth - this.ActualWidth));
+                 //   this.Top = Math.Max(0, Math.Min(loc.Y,
+                 //       SystemParameters.VirtualScreenHeight - this.ActualHeight));
+                //}
+
+             //   if (size.Width != 0 && size.Height != 0)
+              //  {
+              //      this.Width = size.Width;
+              //      this.Height = size.Height;
+              //  }
+
+            //}
             
             _mainWindow = this;
+            // Start loading logic asynchronously
+            //Task.Run(() => LoadLogic())
+                Loaded += MainWindow_Loaded;
         }
 
+        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            await LoadLogic(); // Perform asynchronous operations here
+        }
+
+
+        //  private void InitializeComponent()
+        //  {
+        //      throw new NotImplementedException();
+        //  }
 
         private void ListViewMenu_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -799,7 +841,7 @@ namespace Elpis
             return true;
         }
 
-        private void FinalLoad()
+        private async Task FinalLoad()
         {
             Version ver = Assembly.GetEntryAssembly().GetName().Version;
             if (_config.Fields.Elpis_Version == null || _config.Fields.Elpis_Version < ver)
@@ -819,10 +861,10 @@ namespace Elpis
                 post.Add("newver", _config.Fields.Elpis_Version.ToString());
                 post.Add("osver", SystemInfo.GetWindowsVersion());
 
-                try
-                {
-                    post.Send();
-                }
+        try
+        {
+            await Task.Run(() => post.Send()); // Send analytics data asynchronously
+        }
                 catch(Exception ex)
                 {
                     Log.O(ex.ToString());
@@ -834,7 +876,7 @@ namespace Elpis
             try
             {
                 _player = new Player();
-                _player.Initialize(_bassRegEmail, _bassRegKey); //TODO - put this in the login sequence?
+                await Task.Run(() => _player.Initialize(_bassRegEmail, _bassRegKey)); // Initialize player asynchronously
                 if (_config.Fields.Proxy_Address != string.Empty)
                     _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
                         _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
@@ -846,7 +888,7 @@ namespace Elpis
                 return;
             }
 
-            LoadLastFM();
+            await Task.Run(LoadLastFM); // Load LastFM asynchronously
 
             _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
             _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
@@ -864,44 +906,49 @@ namespace Elpis
 
             _loadingPage.UpdateStatus("Starting Web Server...");
 
-            StartWebServer();
+            await Task.Run(StartWebServer); // Start the web server asynchronously
 
             _loadingPage.UpdateStatus("Setting up UI...");
 
-            this.Dispatch(() => {
+            await Dispatcher.InvokeAsync(() =>
+            {
                 _keyHost = new HotKeyHost(this);
                 ConfigureHotKeys();
+                SetupJumpList();
+                SetupNotifyIcon();
+                mainBar.DataContext = _player; // To bind playstate
+                SetupPages();
+                SetupUIEvents();
+                SetupPageEvents();
+                SetupThumbnailToolbarButtons();
             });
 
-            this.Dispatch(SetupJumpList);
+            //this.Dispatch(SetupJumpList);
 
-            this.Dispatch(SetupNotifyIcon);
+            //this.Dispatch(SetupNotifyIcon);
 
-            this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
+            //this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
 
-            this.Dispatch(SetupPages);
-            this.Dispatch(SetupUIEvents);
-            this.Dispatch(SetupPageEvents);
+            //this.Dispatch(SetupPages);
+            //this.Dispatch(SetupUIEvents);
+            //this.Dispatch(SetupPageEvents);
 
-            this.Dispatch(SetupThumbnailToolbarButtons);
+            //this.Dispatch(SetupThumbnailToolbarButtons);
 
             if (_config.Fields.Login_AutoLogin &&
-                (!string.IsNullOrEmpty(_config.Fields.Login_Email)) &&
-                (!string.IsNullOrEmpty(_config.Fields.Login_Password)))
+                   !string.IsNullOrEmpty(_config.Fields.Login_Email) &&
+                   !string.IsNullOrEmpty(_config.Fields.Login_Password))
             {
-                _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password);
+                await Task.Run(() => _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password));
             }
             else
             {
-                ShowPage(_loginPage);
+                await Dispatcher.InvokeAsync(() => _loginPage);
             }
 
-            this.Dispatch(() => mainBar.Volume = _player.Volume);
+            await Dispatcher.InvokeAsync(() => mainBar.Volume = _player.Volume);
 
             _finalComplete = true;
-
-            if (CurrentPage == _loadingPage && _initComplete && !_finalComplete)
-                Task.Factory.StartNew(FinalLoad);
         }
 
         public void ShowPage(UserControl control)
@@ -1058,7 +1105,7 @@ namespace Elpis
             _player.RegisterPlayerControlQuery(_scrobbler);
         }
 
-        private void LoadLogic()
+        private async Task LoadLogic()
         {
             bool foundNewUpdate = false;
             if (InitLogic())

@@ -32,12 +32,16 @@ using Newtonsoft.Json.Linq;
 using File = System.IO.File;
 using System.Xml.Serialization;
 using System.Web.Script.Serialization;
+using System.Threading.Tasks;
+
 
 namespace PandoraSharp
 {
     public class Station : INotifyPropertyChanged
     {
         private readonly object _playlistLock = new object(); // Add lock
+        private bool _gettingPlaylist = false;
+
         private readonly object _artLock = new object();
         private readonly Pandora _pandora;
         private byte[] _artImage;
@@ -197,60 +201,106 @@ namespace PandoraSharp
             }
         }
 
-        private bool _gettingPlaylist = false;
-        public List<Song> GetPlaylist()
+        //private bool _gettingPlaylist = false;
+        public async Task<List<Song>> GetPlaylistAsync()
         {
-            // Use a lock to ensure only one thread can execute this at a time.
+            // Take/inspect the gate under lock, then release before awaiting.
             lock (_playlistLock)
             {
-                var results = new List<Song>();
-                if (_gettingPlaylist) return results;
-                Log.O("GetPlaylist");
-                try
-                {
-                    _gettingPlaylist = true;
-                    JObject req = new JObject();
-                    req["stationToken"] = IdToken;
-                    if (_pandora.AudioFormat != PAudioFormat.AACPlus)
-                        req["additionalAudioUrl"] = "HTTP_128_MP3,HTTP_192_MP3";
-
-                    var playlist = _pandora.CallRPC("station.getPlaylist", req, false, true); // MUST use SSL
-
-                    foreach (var song in playlist.Result["items"])
-                    {
-                        if (song["songName"] == null) continue;
-                        try
-                        {
-                            results.Add(new Song(_pandora, song));
-                        }
-                        catch (PandoraException ex)
-                        {
-                            Log.O("Song Add Error: " + ex.FaultMessage);
-                        }
-                    }
-
-                    _gettingPlaylist = false;
-                    return results;
-                }
-                catch (PandoraException ex)
-                {
-                    _gettingPlaylist = false;
-                    if (ex.Message == "PLAYLIST_END" || ex.Message == "DAILY_SKIP_LIMIT_REACHED")
-                    {
-                        if (ex.Message == "PLAYLIST_END")
-                        {
-                            SkipLimitReached = true;
-                            SkipLimitTime = DateTime.Now;
-                        }
-                        else
-                            throw;
-                    }
-
-                    Log.O("Error getting playlist, will try again next time: " + Errors.GetErrorMessage(ex.Fault));
-                    return results;
-                }
-            }// close lock
+                if (_gettingPlaylist)
+                    return new List<Song>();
+                _gettingPlaylist = true;
             }
+
+            Log.O("GetPlaylist");
+
+            try
+            {
+                if (_pandora == null)
+                    throw new InvalidOperationException("_pandora is null in GetPlaylistAsync.");
+
+                if (string.IsNullOrWhiteSpace(IdToken))
+                    throw new InvalidOperationException("Station IdToken is null/empty in GetPlaylistAsync.");
+
+                var req = new JObject
+                {
+                    ["stationToken"] = IdToken
+                };
+
+                if (_pandora.AudioFormat != PAudioFormat.AACPlus)
+                    req["additionalAudioUrl"] = "HTTP_128_MP3,HTTP_192_MP3";
+
+                // MUST use SSL
+                var playlist = await _pandora.CallRPC("station.getPlaylist", req, isAuth: false, useSSL: true)
+                                             .ConfigureAwait(false);
+
+                // Be defensive about the JSON shape
+                var resultToken = playlist?.Result;
+                if (resultToken == null)
+                {
+                    Log.O("Playlist RPC returned null Result.");
+                    return new List<Song>();
+                }
+
+                var items = resultToken["items"] as JArray;
+                if (items == null || items.Count == 0)
+                {
+                    Log.O("Playlist has no items.");
+                    return new List<Song>();
+                }
+
+                var results = new List<Song>(items.Count);
+                foreach (var jt in items)
+                {
+                    if (jt?["songName"] == null) continue;
+                    try
+                    {
+                        results.Add(new Song(_pandora, jt));
+                    }
+                    catch (PandoraException ex)
+                    {
+                        Log.O("Song Add Error: " + ex.FaultMessage);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.O("Song Add Error: " + ex);
+                    }
+                }
+
+                return results;
+            }
+            catch (PandoraException ex)
+            {
+                if (ex.Message == "PLAYLIST_END")
+                {
+                    SkipLimitReached = true;
+                    SkipLimitTime = DateTime.Now;
+                    Log.O("Playlist end reached.");
+                    return new List<Song>();
+                }
+                if (ex.Message == "DAILY_SKIP_LIMIT_REACHED")
+                {
+                    // preserve your previous behavior: rethrow
+                    throw;
+                }
+
+                Log.O("Error getting playlist, will try again next time: " + Errors.GetErrorMessage(ex.Fault));
+                return new List<Song>();
+            }
+            finally
+            {
+                lock (_playlistLock)
+                {
+                    _gettingPlaylist = false;
+                }
+            }
+        }
+
+        public List<Song> GetPlaylist()
+        {
+            return GetPlaylistAsync().GetAwaiter().GetResult(); // blocking shim
+        }
+
 
         public void AddVariety(SearchResult item)
         {

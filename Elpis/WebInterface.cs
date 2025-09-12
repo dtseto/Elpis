@@ -26,34 +26,60 @@ using Kayak;
 using Kayak.Http;
 using PandoraSharp;
 using System.Web.Script.Serialization;
+using System.Threading;
+
 
 namespace Elpis
 {
     class WebInterface
     {
+        private static int started = 0;
+
         private IScheduler _scheduler;
         public void StartInterface()
         {
-#if DEBUG
+            if (Interlocked.Exchange(ref started, 1) == 1)
+                return; // already started
+
+            #if DEBUG
             Debug.Listeners.Add(new TextWriterTraceListener(Console.Out));
             Debug.AutoFlush = true;
-#endif
+            #endif
 
             _scheduler = KayakScheduler.Factory.Create(new SchedulerDelegate());
             var server = KayakServer.Factory.CreateHttp(new RequestDelegate(), _scheduler);
 
+            // Run on this thread until Stop() is called
             using (server.Listen(new IPEndPoint(IPAddress.Any, 35747)))
             {
                 // runs scheduler on calling thread. this method will block until
                 // someone calls Stop() on the scheduler.
                 _scheduler.Start();
             }
+
+            // Optional: allow restart in the same process after Stop()
+            Interlocked.Exchange(ref started, 0);
         }
 
         public void StopInterface()
         {
-            _scheduler.Stop();
+            try
+            {
+                // Null-safe, idempotent stop
+                _scheduler?.Stop();
+            }
+            catch (ObjectDisposedException) { /* already disposed */ }
+            catch (InvalidOperationException) { /* already stopped */ }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("StopInterface error: " + ex);
+            }
+            finally
+            {
+                _scheduler = null;
+            }
         }
+   
         class SchedulerDelegate : ISchedulerDelegate
         {
             public void OnException(IScheduler scheduler, Exception e)
@@ -273,50 +299,52 @@ namespace Elpis
             }
         }
 
-        class BufferedConsumer : IDataConsumer
+    class BufferedConsumer : IDataConsumer
+    {
+        List<ArraySegment<byte>> buffer = new List<ArraySegment<byte>>();
+        Action<string> resultCallback;
+        Action<Exception> errorCallback;
+
+        public BufferedConsumer(Action<string> resultCallback,
+    Action<Exception> errorCallback)
         {
-            List<ArraySegment<byte>> buffer = new List<ArraySegment<byte>>();
-            Action<string> resultCallback;
-            Action<Exception> errorCallback;
-
-            public BufferedConsumer(Action<string> resultCallback,
-        Action<Exception> errorCallback)
-            {
-                this.resultCallback = resultCallback;
-                this.errorCallback = errorCallback;
-            }
-            public bool OnData(ArraySegment<byte> data, Action continuation)
-            {
-                // since we're just buffering, ignore the continuation.
-                // TODO: place an upper limit on the size of the buffer.
-                // don't want a client to take up all the RAM on our server!
-                buffer.Add(data);
-                return false;
-            }
-            public void OnError(Exception error)
-            {
-                errorCallback(error);
-            }
-
-            public void OnEnd()
-            {
-                // turn the buffer into a string.
-                //
-                // (if this isn't what you want, you could skip
-                // this step and make the result callback accept
-                // List<ArraySegment<byte>> or whatever)
-                //
-                var str = "";
-                if (buffer.Count > 0)
-                {
-                    str = buffer
-                    .Select(b => Encoding.UTF8.GetString(b.Array, b.Offset, b.Count))
-                    .Aggregate((result, next) => result + next);
-                }
-
-
-                resultCallback(str);
-            }
+            this.resultCallback = resultCallback;
+            this.errorCallback = errorCallback;
         }
+        public bool OnData(ArraySegment<byte> data, Action continuation)
+        {
+            // since we're just buffering, ignore the continuation.
+            // TODO: place an upper limit on the size of the buffer.
+            // don't want a client to take up all the RAM on our server!
+            buffer.Add(data);
+            return false;
+        }
+        public void OnError(Exception error)
+        {
+            errorCallback(error);
+        }
+
+        public void OnEnd()
+        {
+            // turn the buffer into a string.
+            //
+            // (if this isn't what you want, you could skip
+            // this step and make the result callback accept
+            // List<ArraySegment<byte>> or whatever)
+            //
+            var str = "";
+            if (buffer.Count > 0)
+            {
+                str = buffer
+                .Select(b => Encoding.UTF8.GetString(b.Array, b.Offset, b.Count))
+                .Aggregate((result, next) => result + next);
+            }
+            resultCallback(str);
+        }
+
     }
+
+     }
+
+
 }

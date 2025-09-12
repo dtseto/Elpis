@@ -24,7 +24,7 @@ namespace Kayak
 
             this.del = del;
             this.scheduler = scheduler;
-            listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP);
+            listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             state = new KayakServerState();
         }
 
@@ -40,20 +40,35 @@ namespace Kayak
 
         public IDisposable Listen(IPEndPoint ep)
         {
-			if (ep == null)
-				throw new ArgumentNullException("ep");
-			
+            if (ep == null) throw new ArgumentNullException(nameof(ep));
             state.SetListening();
-            
-            Debug.WriteLine("KayakServer will bind to " + ep.ToString());
-            
+
+            Debug.WriteLine($"KayakServer will bind to {ep}");
+
+            // Make sure the socket was created as TCP:
+            // listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            // ---- Set options BEFORE Bind ----
+            // EITHER prevent other processes from binding the same port…
+            listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ExclusiveAddressUse, true);
+
+            // …OR allow quick restarts on the same port during TIME_WAIT (choose ONE of these patterns)
+            // listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+
+            // Optional: fast close sends RST; use with care
+            listener.LingerState = new LingerOption(true, 0);
+
+            // ---- Bind & listen ----
             listener.Bind(ep);
-            listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveTimeout, 10000);
-            listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.SendTimeout, 10000);
-            listener.Listen((int)SocketOptionName.MaxConnections);
-			
-            Debug.WriteLine("KayakServer bound to " + ep.ToString());
-			
+            listener.Listen(100); // real backlog; don’t call Listen twice
+
+            Debug.WriteLine($"KayakServer bound to {ep}");
+
+            // DO NOT set Receive/SendTimeout on the listening socket; apply to accepted sockets instead.
+            // If you need timeouts, do it when you accept:
+            //   socket.ReceiveTimeout = 10000; 
+            //   socket.SendTimeout = 10000;
+
             AcceptNext();
             return new Disposable(() => Close());
         }

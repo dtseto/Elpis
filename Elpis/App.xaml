@@ -1,26 +1,46 @@
-﻿<Application 
+﻿<Application
     x:Class="Elpis.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:converters="clr-namespace:GUI.Converters"
     StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
+                <!-- MDIX (keep these first) -->
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Dark.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Defaults.xaml" />
+                <!-- (Fonts.xaml removed) -->
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignColors;component/Themes/Recommended/Primary/MaterialDesignColor.BlueGrey.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignColors;component/Themes/Recommended/Accent/MaterialDesignColor.Lime.xaml" />
+                <!-- Your app resources AFTER MDIX -->
                 <ResourceDictionary Source="/Elpis;component/Styles/Brushes.xaml" />
                 <ResourceDictionary Source="/Elpis;component/Styles/BaseControls.xaml" />
                 <ResourceDictionary Source="/Elpis;component/Styles/Misc.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Dark.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Defaults.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignColors;component/Themes/Recommended/Primary/MaterialDesignColor.BlueGrey.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignColors;component/Themes/Recommended/Accent/MaterialDesignColor.Lime.xaml" />
                 <ResourceDictionary Source="Styles/DMScrollViewer.xaml" />
                 <ResourceDictionary Source="Styles/ProgressBar.xaml" />
                 <ResourceDictionary Source="Styles/ScrollBars.xaml" />
-                <ResourceDictionary Source="Styles/Misc.xaml" />
+                <!-- Remove duplicate if this is the same Misc.xaml -->
+                <!--<ResourceDictionary Source="Styles/Misc.xaml" />-->
                 <ResourceDictionary Source="Styles/Color.xaml" />
                 <ResourceDictionary Source="Styles/Colors.xaml" />
+
+                <!-- Fallbacks (AFTER everything so they win) -->
+                <ResourceDictionary>
+                    <SolidColorBrush x:Key="MaterialDesignBody" Color="#DEFFFFFF"/>
+                    <SolidColorBrush x:Key="MaterialDesignDivider" Color="#1FFFFFFF"/>
+                    <SolidColorBrush x:Key="MaterialDesignPaper" Color="#FF303030"/>
+                    <SolidColorBrush x:Key="MaterialDesignSelection" Color="#40FFFFFF"/>
+                    <SolidColorBrush x:Key="MaterialDesignTextBoxBorder" Color="#1FFFFFFF"/>
+                    <FontFamily x:Key="MaterialDesignFont">Segoe UI</FontFamily>
+                    <!-- RIGHT: use a semi-transparent white as ripple brush -->
+                    <SolidColorBrush x:Key="MaterialDesignFlatButtonRipple" Color="#20FFFFFF" />
+                </ResourceDictionary>
+
             </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="MaterialDesignFloatingActionDarkButton"
+           TargetType="Button"
+           BasedOn="{StaticResource MaterialDesignFloatingActionButton}">
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

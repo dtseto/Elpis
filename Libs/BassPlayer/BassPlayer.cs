@@ -1,21 +1,11 @@
-/*
+﻿/*
  * Copyright 2012 - Adam Haile / Media Portal
  * http://adamhaile.net
- *
  * This file is part of BassPlayer.
  * BassPlayer is free software: you can redistribute it and/or modify 
  * it under the terms of the GNU General Public License as published by 
  * the Free Software Foundation, either version 3 of the License, or 
  * (at your option) any later version.
- * 
- * BassPlayer is distributed in the hope that it will be useful, 
- * but WITHOUT ANY WARRANTY; without even the implied warranty of 
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License 
- * along with BassPlayer. If not, see http://www.gnu.org/licenses/.
- * 
  * Note: Below is a heavily modified version of BassAudio.cs from
  * http://sources.team-mediaportal.com/websvn/filedetails.php?repname=MediaPortal&path=%2Ftrunk%2Fmediaportal%2FCore%2FMusicPlayer%2FBASS%2FBassAudio.cs
 */
@@ -42,116 +32,6 @@ namespace BassPlayer
     /// This singleton class is responsible for managing the BASS audio Engine object. 
     /// </summary>
     //public class BassMusicPlayer
-    //{
-    //    #region Variables
-
-    //    internal static BassAudioEngine _Player;
-    //    private static Thread BassAsyncLoadThread;
-
-    //    private static string _email = string.Empty;
-    //    private static string _key = string.Empty;
-
-    //    #endregion
-
-    //    #region Constructors/Destructors
-
-    //    // Singleton -- make sure we can't instantiate this class
-    //    private BassMusicPlayer()
-    //    {
-    //    }
-
-    //    #endregion
-
-    //    #region Properties
-
-    //    /// <summary>
-    //    /// Returns the BassAudioEngine Object
-    //    /// </summary>
-    //    public static BassAudioEngine Player
-    //    {
-    //        get
-    //        {
-    //            if (_Player == null)
-    //            {
-    //                _Player = new BassAudioEngine(_email, _key);
-    //            }
-
-    //            return _Player;
-    //        }
-    //    }
-
-    //    /// <summary>
-    //    /// Returns a Boolean if the BASS Audio Engine is initialised
-    //    /// </summary>
-    //    public static bool Initialized
-    //    {
-    //        get { return _Player != null && _Player.Initialized; }
-    //    }
-
-    //    /// <summary>
-    //    /// Is the BASS Engine Freed?
-    //    /// </summary>
-    //    public static bool BassFreed
-    //    {
-    //        get { return _Player.BassFreed; }
-    //    }
-
-    //    #endregion
-
-    //    #region Public Methods
-
-    //    /// <summary>
-    //    /// Create the BASS Audio Engine Objects
-    //    /// </summary>
-    //    //public static void CreatePlayerAsync()
-    //    //{
-    //    //    if (_Player != null)
-    //    //    {
-    //    //        return;
-    //    //    }
-    //    //    ThreadStart ts = InternalCreatePlayerAsync;
-    //    //    BassAsyncLoadThread = new Thread(ts);
-    //    //    BassAsyncLoadThread.Name = "BassAudio";
-    //    //    BassAsyncLoadThread.Start();
-    //    //}
-    //    public static void SetRegistration(string email, string key)
-    //    {
-    //        _email = email;
-    //        _key = key;
-    //    }
-
-    //    /// <summary>
-    //    /// Frees, the BASS Audio Engine.
-    //    /// </summary>
-    //    public static void FreeBass()
-    //    {
-    //        if (_Player == null)
-    //        {
-    //            return;
-    //        }
-
-    //        _Player.FreeBass();
-    //    }
-
-    //    #endregion
-
-    //    #region Private Methods
-
-    //    /// <summary>
-    //    /// Thread for Creating the BASS Audio Engine objects.
-    //    /// </summary>
-    //    private static void InternalCreatePlayerAsync()
-    //    {
-    //        if (_Player == null)
-    //        {
-    //            _Player = new BassAudioEngine();
-    //        }
-    //    }
-
-    //    #endregion
-    //}
-
-
 
     public class BassException : Exception
     {
@@ -187,6 +67,17 @@ namespace BassPlayer
     /// </summary>
     public class BassAudioEngine : IDisposable // : IPlayer
     {
+
+        // 🔒 Put these at the top of the class, with your other fields
+        private readonly object _bassInitLock = new object();
+
+        // Tracks whether BASS is currently active (i.e., successfully BASS_Init'ed and not freed)
+        private volatile bool _bassActive = false;
+
+        private readonly string _regEmail;
+        private readonly string _regKey;
+
+
         // new basslock
         private readonly object _bassLock = new object();
 
@@ -316,8 +207,8 @@ namespace BassPlayer
                                                           {0, 1} // right-rear center out = right in
                                                       };
 
-        private readonly string _regEmail = string.Empty;
-        private readonly string _regKey = string.Empty;
+        //private readonly string _regEmail = string.Empty;
+        //private readonly string _regKey = string.Empty;
 
         private readonly List<int> soundFontHandles = new List<int>();
 
@@ -739,9 +630,17 @@ namespace BassPlayer
         /// </summary>
         public void FreeBass()
         {
-            if (!_BassFreed)
+            lock (_bassInitLock)
             {
-                Log.Info("BASS: Freeing BASS. Non-audio media playback requested.");
+                if (_BassFreed || !_bassActive)
+                {
+                    Log.Info("BASS: FreeBass skipped (already freed).");
+                    _BassFreed = true;
+                    _bassActive = false;
+                    return;
+                }
+
+                Log.Info("BASS: Freeing BASS.");
 
                 if (_mixer != 0)
                 {
@@ -749,8 +648,11 @@ namespace BassPlayer
                     _mixer = 0;
                 }
 
+                Bass.BASS_Stop();
                 Bass.BASS_Free();
+
                 _BassFreed = true;
+                _bassActive = false;
             }
         }
 
@@ -761,58 +663,68 @@ namespace BassPlayer
         {
             try
             {
-                // Check if BASS is already initialized
-                if (_Initialized && !_BassFreed)
+                lock (_bassInitLock)
                 {
-                    Log.Warn("BASS: Initialization skipped as BASS is already initialized.");
-                    return;
-                }
-
-                Log.Info("BASS: Initializing BASS audio engine...");
-                bool initOK = false;
-
-                // Free BASS if it was previously initialized but not freed
-                if (_Initialized && _BassFreed)
-                {
-                    FreeBass();
-                }
-
-                Bass.BASS_SetConfig(BASSConfig.BASS_CONFIG_DEV_DEFAULT, true); //Allows following Default device (Win 7 Only)
-                int soundDevice = GetSoundDevice();
-
-                initOK =
-                    (Bass.BASS_Init(soundDevice, 44100, BASSInit.BASS_DEVICE_DEFAULT | BASSInit.BASS_DEVICE_LATENCY,
-                                    IntPtr.Zero));
-                if (initOK)
-                {
-                    // Create an 8 Channel Mixer, which should be running until stopped.
-                    // The streams to play are added to the active screen
-                    if (_Mixing && _mixer == 0)
+                    // already active? no-op
+                    if (_bassActive)
                     {
-                        _mixer = BassMix.BASS_Mixer_StreamCreate(44100, 8,
-                                                                 BASSFlag.BASS_MIXER_NONSTOP |
-                                                                 BASSFlag.BASS_STREAM_AUTOFREE);
+                        Log.Warn("BASS: Initialization skipped (already active).");
+                        return;
                     }
 
-                    UpdateTimer.Interval = _progUpdateInterval;
-                    UpdateTimer.Tick += OnUpdateTimerTick;
+                    Log.Info("BASS: Initializing BASS audio engine...");
 
-                    Log.Info("BASS: Initialization done.");
-                    _Initialized = true;
-                    _BassFreed = false;
-                }
-                else
-                {
-                    BASSError error = Bass.BASS_ErrorGetCode();
-                    Log.Error("BASS: Error initializing BASS audio engine {0}",
-                              Enum.GetName(typeof (BASSError), error));
-                    throw new Exception("Init Error: " + error.ToString());
+                    Bass.BASS_SetConfig(BASSConfig.BASS_CONFIG_DEV_DEFAULT, true);
+                    int soundDevice = GetSoundDevice();
+
+                    bool ok = Bass.BASS_Init(
+                        soundDevice,
+                        44100,
+                        BASSInit.BASS_DEVICE_DEFAULT | BASSInit.BASS_DEVICE_LATENCY,
+                        IntPtr.Zero
+                    );
+
+                    if (!ok)
+                    {
+                        var err = Bass.BASS_ErrorGetCode();
+                        if (err == BASSError.BASS_ERROR_ALREADY)
+                        {
+                            // another thread (or device switch) beat us to it → treat as success
+                            Log.Warn("BASS: BASS_Init returned ALREADY; treating as initialized.");
+                            _bassActive = true;
+                            _Initialized = true;
+                            _BassFreed = false;
+                        }
+                        else
+                        {
+                            Log.Error("BASS: Error initializing BASS audio engine {0}", err);
+                            throw new BassException("Init Error: " + err);
+                        }
+                    }
+                    else
+                    {
+                        if (_Mixing && _mixer == 0)
+                        {
+                            _mixer = BassMix.BASS_Mixer_StreamCreate(
+                                44100, 8,
+                                BASSFlag.BASS_MIXER_NONSTOP | BASSFlag.BASS_STREAM_AUTOFREE
+                            );
+                        }
+
+                        UpdateTimer.Interval = _progUpdateInterval;
+                        UpdateTimer.Tick += OnUpdateTimerTick;
+
+                        Log.Info("BASS: Initialization done.");
+                        _Initialized = true;
+                        _BassFreed = false;
+                        _bassActive = true;
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Log.Error("BASS: Initialize failed. Reason: {0}", ex.Message);
-                throw new BassException("BASS: Initialize failed. Reason: }" + ex.Message);
+                throw new BassException("BASS: Initialize failed. Reason: " + ex.Message);
             }
         }
 
@@ -877,10 +789,7 @@ namespace BassPlayer
         {
             //TODO - Load Settings
 
-            //using (Profile.Settings xmlreader = new Profile.MPSettings())
-            //{
             _SoundDevice = "Default";
-            //xmlreader.GetValueAsString("audioplayer", "sounddevice", "Default Sound Device");
 
             _StreamVolume = 100; // xmlreader.GetValueAsInt("audioplayer", "streamOutputLevel", 85);
             _BufferingMS = 5000; // xmlreader.GetValueAsInt("audioplayer", "buffering", 5000);
@@ -900,42 +809,11 @@ namespace BassPlayer
             _DefaultCrossFadeIntervalMS = 0;
             _playBackType = (int)PlayBackType.NORMAL;
 
-            //if (_CrossFadeIntervalMS < 0)
-            //{
-            //    _CrossFadeIntervalMS = 0;
-            //}
-
-            //else if (_CrossFadeIntervalMS > 16000)
-            //{
-            //    _CrossFadeIntervalMS = 16000;
-            //}
-
-            //_DefaultCrossFadeIntervalMS = _CrossFadeIntervalMS;
-
             _SoftStop = true; //xmlreader.GetValueAsBool("audioplayer", "fadeOnStartStop", true);
 
             _Mixing = false; //xmlreader.GetValueAsBool("audioplayer", "mixing", false);
 
             bool doGaplessPlayback = false; //xmlreader.GetValueAsBool("audioplayer", "gaplessPlayback", false);
-
-            //if (doGaplessPlayback)
-            //{
-               // _CrossFadeIntervalMS = 200;
-              //  _playBackType = (int) PlayBackType.GAPLESS;
-            //}
-            //else
-            //{
-                //if (_CrossFadeIntervalMS == 0)
-                //{
-                 //   _playBackType = (int) PlayBackType.NORMAL;
-                 //   _CrossFadeIntervalMS = 100;
-                //}
-               // else
-               // {
-              //      _playBackType = (int) PlayBackType.CROSSFADE;
-              //  }
-            //}
-            //}
         }
 
         /// <summary>
@@ -968,20 +846,6 @@ namespace BassPlayer
         /// <returns></returns>
         internal int GetCurrentStream()
         {
-          //  if (Streams.Count == 0)
-          //  {
-          //      return -1;
-          //  }
-
-           // if (CurrentStreamIndex < 0)
-           // {
-           //     CurrentStreamIndex = 0;
-           // }
-
-           // else if (CurrentStreamIndex >= Streams.Count)
-           // {
-           //     CurrentStreamIndex = Streams.Count - 1;
-           // }
 
             return _currentStreamHandle;
         }
@@ -1058,77 +922,10 @@ namespace BassPlayer
         /// Load External BASS Audio Decoder Plugins
         /// </summary>
         private void LoadAudioDecoderPlugins()
-        {
+        { 
+            // not used in windows 10 11 etc
             //In this case, only load AAC to save load time
             Log.Info("BASS: Loading AAC Decoder");
-
-            string decoderFolderPath = Path.GetDirectoryName(Assembly.GetAssembly(typeof (BassAudioEngine)).Location);
-            if(decoderFolderPath == null)
-            {
-                Log.Error(@"BASS: Unable to load AAC decoder.");
-                throw new BassException(@"BASS: Unable to load AAC decoder.");
-            }
-
-            string aacDecoder = Path.Combine(decoderFolderPath, "bass_aac.dll");
-
-            int pluginHandle = 0;
-            if ((pluginHandle = Bass.BASS_PluginLoad(aacDecoder)) != 0)
-            {
-                DecoderPluginHandles.Add(pluginHandle);
-                Log.Debug("BASS: Added DecoderPlugin: {0}", aacDecoder);
-            }
-            else
-            {
-                Log.Error(@"BASS: Unable to load AAC decoder.");
-                throw new BassException(@"BASS: Unable to load AAC decoder.");
-            }
-
-            /*
-            if (!Directory.Exists(decoderFolderPath))
-            {
-                Log.Error(@"BASS: Unable to find decoders path.");
-                throw new BassException(@"BASS: Unable to find decoders path.");
-            }
-
-            var dirInfo = new DirectoryInfo(decoderFolderPath);
-            FileInfo[] decoders = dirInfo.GetFiles();
-
-            int pluginHandle = 0;
-            int decoderCount = 0;
-
-            foreach (FileInfo file in decoders)
-            {
-                if (Path.GetExtension(file.Name).ToLower() != ".dll")
-                {
-                    continue;
-                }
-
-                pluginHandle = Bass.BASS_PluginLoad(file.FullName);
-
-                if (pluginHandle != 0)
-                {
-                    DecoderPluginHandles.Add(pluginHandle);
-                    decoderCount++;
-                    Log.Debug("BASS: Added DecoderPlugin: {0}", file.FullName);
-                }
-
-                else
-                {
-                    Log.Debug("BASS: Unable to load: {0}", file.FullName);
-                }
-            }
-
-            if (decoderCount > 0)
-            {
-                Log.Info("BASS: Loaded {0} Audio Decoders.", decoderCount);
-            }
-
-            else
-            {
-                Log.Error(@"BASS: No audio decoders were loaded. Confirm decoders are present in path.");
-                throw new BassException(@"BASS: No audio decoders were loaded. Confirm decoders are present in path.");
-            }
-             * */
         }
 
         public void SetGain(double gainDB)
@@ -2388,62 +2185,59 @@ namespace BassPlayer
             if (newOutputDevice == null)
                 throw new BassException("Null value provided to ChangeOutputDevice(string)");
 
-            // Attempt to find the device number for the given string
-            int oldDeviceId = Bass.BASS_GetDevice();
-            int newDeviceId = -1;
-            BASS_DEVICEINFO[] soundDeviceDescriptions = Bass.BASS_GetDeviceInfos();
-            for (int i = 0; i < soundDeviceDescriptions.Length; i++)
+            lock (_bassInitLock)
             {
-                if (newOutputDevice.Equals(soundDeviceDescriptions[i].name))
-                    newDeviceId = i;
-            }
-            if (newDeviceId == -1)
-                throw new BassException("Cannot find an output device matching description [" + newOutputDevice + "]");
+                int oldDeviceId = Bass.BASS_GetDevice();
+                int newDeviceId = -1;
 
-            Log.Info("BASS: Old device ID " + oldDeviceId);
-            Log.Info("BASS: New device ID " + newDeviceId);
+                var infos = Bass.BASS_GetDeviceInfos();
+                for (int i = 0; i < infos.Length; i++)
+                    if (newOutputDevice.Equals(infos[i].name)) { newDeviceId = i; break; }
 
-            // Make sure we're actually changing devices
-            if (oldDeviceId == newDeviceId) return;
+                if (newDeviceId == -1)
+                    throw new BassException("Cannot find an output device matching [" + newOutputDevice + "]");
 
-            // Initialize the new device
-            bool initOK = false;
-            BASS_DEVICEINFO info = Bass.BASS_GetDeviceInfo(newDeviceId);
-            if (!info.IsInitialized)
-            {
-                Log.Info("BASS: Initializing new device ID " + newDeviceId);
-                initOK = (Bass.BASS_Init(newDeviceId, 44100, BASSInit.BASS_DEVICE_DEFAULT | BASSInit.BASS_DEVICE_LATENCY, IntPtr.Zero));
-                if (!initOK)
+                if (oldDeviceId == newDeviceId) return;
+
+                var info = Bass.BASS_GetDeviceInfo(newDeviceId);
+                if (!info.IsInitialized)
                 {
-                    BASSError error = Bass.BASS_ErrorGetCode();
-                    throw new BassException("Cannot initialize output device [" + newOutputDevice + "], error is [" + Enum.GetName(typeof(BASSError), error) + "]");
+                    Log.Info("BASS: Initializing new device ID " + newDeviceId);
+                    bool ok = Bass.BASS_Init(newDeviceId, 44100,
+                        BASSInit.BASS_DEVICE_DEFAULT | BASSInit.BASS_DEVICE_LATENCY, IntPtr.Zero);
+                    if (!ok)
+                    {
+                        var err = Bass.BASS_ErrorGetCode();
+                        if (err != BASSError.BASS_ERROR_ALREADY)
+                            throw new BassException("Cannot initialize output device [" + newOutputDevice + "], error [" + err + "]");
+                    }
                 }
-            }
 
-            // If anything is playing, move the stream to the new output device
-            if (State == PlayState.Playing)
-            {
-                Log.Info("BASS: Moving current stream to new device ID " + newDeviceId);
-                int stream = GetCurrentStream();
-                Bass.BASS_ChannelSetDevice(stream, newDeviceId);
-            }
-
-            // If the previous device was init'd, free it
-            if (oldDeviceId >= 0)
-            {
-                info = Bass.BASS_GetDeviceInfo(oldDeviceId);
-                if (info.IsInitialized)
+                if (State == PlayState.Playing)
                 {
-                    Log.Info("BASS: Freeing device " + oldDeviceId);
-                    Bass.BASS_SetDevice(oldDeviceId);
-                    Bass.BASS_Free();
-                    Bass.BASS_SetDevice(newDeviceId);
+                    Log.Info("BASS: Moving current stream to new device ID " + newDeviceId);
+                    int stream = GetCurrentStream();
+                    Bass.BASS_ChannelSetDevice(stream, newDeviceId);
                 }
-            }
 
-            _SoundDevice = newOutputDevice; 
+                if (oldDeviceId >= 0)
+                {
+                    var oldInfo = Bass.BASS_GetDeviceInfo(oldDeviceId);
+                    if (oldInfo.IsInitialized)
+                    {
+                        Log.Info("BASS: Freeing device " + oldDeviceId);
+                        Bass.BASS_SetDevice(oldDeviceId);
+                        Bass.BASS_Free();
+                        Bass.BASS_SetDevice(newDeviceId);
+                    }
+                }
+
+                _SoundDevice = newOutputDevice;
+                _bassActive = true;
+                _BassFreed = false;
+                _Initialized = true;
+            }
         }
-
         #endregion
 
         public event PlaybackStartHandler PlaybackStart;

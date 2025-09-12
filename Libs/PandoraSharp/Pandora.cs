@@ -282,29 +282,34 @@ namespace PandoraSharp
             return response;
         }
 
-        protected internal async Task<JSONResult> CallRPC(string method, JObject request = null,
-                                          bool isAuth = false, bool useSSL = false)
+        protected internal async Task<JSONResult> CallRPC(string method, JObject request = null, bool isAuth = false, bool useSSL = false)
         {
-            string response = await CallRPC_Internal(method, request, isAuth, useSSL);
-            JSONResult result = new JSONResult(response);
-            if (result.Fault)
+            try
             {
-                if (!HandleFaults(result, false))
+                string response = await CallRPC_Internal(method, request, isAuth, useSSL).ConfigureAwait(false);
+                var result = new JSONResult(response);
+
+                if (result.Fault && !HandleFaults(result, false))
                 {
                     Log.O("Reauth Required");
-                    if (!await AuthenticateUser())
+                    if (!await AuthenticateUser().ConfigureAwait(false))
                     {
                         HandleFaults(result, true);
                     }
                     else
                     {
-                        response = await CallRPC_Internal(method, request, isAuth, useSSL);
+                        response = await CallRPC_Internal(method, request, isAuth, useSSL).ConfigureAwait(false);
                         HandleFaults(result, true);
                     }
                 }
-            }
 
-            return result;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.O("CallRPC Error: " + ex.ToString());
+                throw;
+            }
         }
 
         protected internal async Task<JSONResult> CallRPC(string method, params object[] args)

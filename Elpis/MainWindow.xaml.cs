@@ -2,13 +2,11 @@
 using Elpis.Hotkeys;
 using Elpis.UpdateSystem;
 using GUI.BorderlessWindow;
-using GUI.PageTransition;
-using MaterialDesignColors;
 using Microsoft.WindowsAPICodePack.Taskbar;
-using NDesk.Options;
 using PandoraSharp;
 using PandoraSharp.Plugins;
 using PandoraSharpPlayer;
+using System;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -23,12 +21,10 @@ using System.Windows.Controls;
 using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Media.Media3D;
-using System.Windows.Shell;
 using Util;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.Window;
 using Log = Util.Log;
 using UserControl = System.Windows.Controls.UserControl;
+
 //Background="#191c1f"
 
 namespace Elpis
@@ -39,6 +35,13 @@ namespace Elpis
     public partial class MainWindow : Window
     {
         #region Globals
+
+        private int _loadLogicOnce;
+        private int _finalLoadOnce;
+        private bool _uiEventsHooked;
+        private bool _pagesBuilt;
+       private bool _pageEventsHooked;
+
 
         private readonly ErrorPage _errorPage;
         private HotKeyHost _keyHost;
@@ -73,6 +76,8 @@ namespace Elpis
         private ToolStripMenuItem _notifyMenu_Tired;
         private ToolStripMenuItem _notifyMenu_Exit;
 
+        private bool _thumbButtonsAdded;  // run-once guard for toolbar buttons
+
         private ThumbnailToolbarButton _thumbnailToolbarThumbUp;
         private ThumbnailToolbarButton _thumbnailToolbarThumbDown;
         private ThumbnailToolbarButton _thumbnailToolbarPlayPause;
@@ -100,7 +105,6 @@ namespace Elpis
         private StationList _stationPage;
         private QuickMixPage _quickMixPage;
         private UpdateCheck _update;
-        private UpdatePage _updatePage;
         private RestartPage _restartPage;
         private LastFMAuthPage _lastFMPage;
 
@@ -113,7 +117,9 @@ namespace Elpis
 
         private static DateTime lastTimeSkipped;
 
-        private WebInterface _webInterfaceObject;
+        private WebInterface _webInterface;
+        private int _closing; // reentrancy guard
+
 
         private bool _restarting = false;
 
@@ -142,20 +148,22 @@ namespace Elpis
 
         public void InitReleaseData()
         {
-//#if APP_RELEASE
+            //#if APP_RELEASE
             _bassRegEmail = ReleaseData.BassRegEmail;
             _bassRegKey = ReleaseData.BassRegKey;
-//#endif
+            //#endif
         }
 
         #endregion
         public MainWindow()
         {
+
             InitializeComponent();
 
-            // Initialize UI components
-            new WindowResizer(this);
+            SourceInitialized += MainWindow_SourceInitialized;
 
+            // REMOVE this line if you’re using WindowChrome:
+            // new WindowResizer(this);
 
             TitleBar.MouseLeftButtonDown += ((o, e) => DragMove());
 
@@ -200,52 +208,25 @@ namespace Elpis
             }
 
 
-            //if (_config.Fields.Proxy_Address != string.Empty)
-              //      PRequest.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-              //          _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
-              //  SwatchesProvider swatchesProvider = new SwatchesProvider();
-
-                //Swatch color = swatchesProvider.Swatches.FirstOrDefault(a => a.Name == _config.Fields.Current_Color);
-           //     if(color != null) new PaletteHelper().ReplacePrimaryColor(color);
-               // var loc = _config.Fields.Elpis_StartupLocation;
-               // var size = _config.Fields.Elpis_StartupSize;
-
-              //  if (loc.X != -1 && loc.Y != -1)
-               // {
-                    // Bug Fix: Issue #54, make sure that the initial window location is
-                    // always fully within the virtual screen bounds.
-                    // Unfortunately may not preserve window location when primary display is not left most
-                    // but it eliminates the missing window problem in most situations.
-                 //   this.Left = Math.Max(0, Math.Min(loc.X,
-                 //       SystemParameters.VirtualScreenWidth - this.ActualWidth));
-                 //   this.Top = Math.Max(0, Math.Min(loc.Y,
-                 //       SystemParameters.VirtualScreenHeight - this.ActualHeight));
-                //}
-
-             //   if (size.Width != 0 && size.Height != 0)
-              //  {
-              //      this.Width = size.Width;
-              //      this.Height = size.Height;
-              //  }
-
-            //}
-            
             _mainWindow = this;
-            // Start loading logic asynchronously
-            //Task.Run(() => LoadLogic())
-                Loaded += MainWindow_Loaded;
+            Loaded += MainWindow_Loaded;
+            //Debug.WriteLine($"MainWindow Loaded: once={_loadLogicOnce}");
         }
+
+        private void MainWindow_SourceInitialized(object sender, EventArgs e)
+        {
+            SetupJumpListSafe();
+            SetupThumbnailToolbarButtonsSafe();
+        }
+
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+           // if (Interlocked.Exchange(ref _loadLogicOnce, 1) == 1) return; // already ran
+
             await LoadLogic(); // Perform asynchronous operations here
+            Debug.WriteLine($"MainWindow Loaded: once={_loadLogicOnce}");
         }
-
-
-        //  private void InitializeComponent()
-        //  {
-        //      throw new NotImplementedException();
-        //  }
 
         private void ListViewMenu_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -319,16 +300,6 @@ namespace Elpis
             }
         }
 
-        static void ShowHelp(OptionSet p)
-        {
-            Console.WriteLine("Usage: Elpis [OPTIONS]");
-            Console.WriteLine("Greet a list of individuals with an optional message.");
-            Console.WriteLine("If no message is specified, a generic greeting is used.");
-            Console.WriteLine();
-            Console.WriteLine("Options:");
-            p.WriteOptionDescriptions(Console.Out);
-        }
-
         #region Setups
 
         private void SetupLogging()
@@ -359,6 +330,8 @@ namespace Elpis
 
         private void SetupPageEvents()
         {
+            if (_pageEventsHooked) return;
+
             _settingsPage.Close += CloseSettings;
             _settingsPage.Restart += _settingsPage_Restart;
             _settingsPage.LastFMAuthRequest += _settingsPage_LastFMAuthRequest;
@@ -371,6 +344,10 @@ namespace Elpis
             _searchPage.Cancel += _searchPage_Cancel;
             _searchPage.AddVariety += _searchPage_AddVariety;
             _loginPage.ConnectingEvent += _loginPage_ConnectingEvent;
+
+            _pageEventsHooked = true;
+            Debug.WriteLine("SetupPageEventsOnce called");
+
         }
 
         void _settingsPage_LasFMDeAuthRequest()
@@ -510,6 +487,9 @@ namespace Elpis
 
         private void SetupUIEvents()
         {
+            if (_uiEventsHooked) return;
+
+            // Player -> UI
             _player.ConnectionEvent += _player_ConnectionEvent;
             _player.LogoutEvent += _player_LogoutEvent;
             _player.StationLoaded += _player_StationLoaded;
@@ -518,9 +498,13 @@ namespace Elpis
             _player.ExceptionEvent += _player_ExceptionEvent;
             _player.PlaybackStateChanged += _player_PlaybackStateChanged;
             _player.LoginStatusEvent += _player_LoginStatusEvent;
+            //Defensive re-hook pattern
+            //_player.PlaybackStart -= _player_PlaybackStart;
             _player.PlaybackStart += _player_PlaybackStart;
+
             _player.StationCreated += _player_StationCreated;
 
+            // UI -> actions
             mainBar.PlayPauseClick += mainBar_PlayPauseClick;
             mainBar.NextClick += mainBar_NextClick;
             mainBar.AboutClick += mainBar_AboutClick;
@@ -541,38 +525,26 @@ namespace Elpis
             _quickMixPage.CancelEvent += _quickMixPage_CancelEvent;
             _quickMixPage.CloseEvent += _quickMixPage_CloseEvent;
             _playlistPage.Loaded += _playlistPage_Loaded;
+
+            _uiEventsHooked = true;
+            Debug.WriteLine("SetupUIEventsOnce called");
+
         }
 
         private void SetupPages()
         {
+            if (_pagesBuilt) return;
             _searchPage = new Search(_player);
-            //transitionControl.AddPage(_searchPage);
-
             _settingsPage = new Settings(_player, _config, _keyHost);
-            //transitionControl.AddPage(_settingsPage);
-
             _restartPage = new RestartPage();
-            //transitionControl.AddPage(_restartPage);
-
             _aboutPage = new About();
-            //transitionControl.AddPage(_aboutPage);
-
             _stationPage = new StationList(_player);
-            //transitionControl.AddPage(_stationPage);
-
             _quickMixPage = new QuickMixPage(_player);
-            //transitionControl.AddPage(_quickMixPage);
-
             _loginPage = new LoginPage(_player, _config);
-            //transitionControl.AddPage(_loginPage);
-
             _historyPage = new HistoryPage(_player, _config);
-
             _playlistPage = new PlaylistPage(_player, _config);
-            //transitionControl.AddPage(_playlistPage);
-
             _lastFMPage = new LastFMAuthPage();
-            //transitionControl.AddPage(_lastFMPage);
+            _pagesBuilt = true;
         }
 
         private void StationMenuClick(object sender, EventArgs e)
@@ -782,20 +754,6 @@ namespace Elpis
             _notify.Visible = true;
         }
 
-        private void SetupThumbnailToolbarButtons()
-        {
-            _thumbnailToolbarThumbUp = new ThumbnailToolbarButton(Properties.Resources.thumbs_up_icon, "Thumb Up");
-            _thumbnailToolbarThumbDown = new ThumbnailToolbarButton(Properties.Resources.thumbs_down_icon, "Thumb Down");
-            _thumbnailToolbarPlayPause = new ThumbnailToolbarButton(Properties.Resources.play_pause, "Play/Pause");
-            _thumbnailToolbarSkip = new ThumbnailToolbarButton(Properties.Resources.skip_song, "Skip");
-
-            TaskbarManager.Instance.ThumbnailToolbars.AddButtons((new WindowInteropHelper(this)).Handle, _thumbnailToolbarThumbUp, _thumbnailToolbarPlayPause, _thumbnailToolbarSkip, _thumbnailToolbarThumbDown);
-            _thumbnailToolbarThumbUp.Click += _thumbnailToolbarThumbUp_Click;
-            _thumbnailToolbarThumbDown.Click += _thumbnailToolbarThumbDown_Click;
-            _thumbnailToolbarPlayPause.Click += _thumbnailToolbarPlayPause_Click;
-            _thumbnailToolbarSkip.Click += _thumbnailToolbarSkip_Click;
-        }
-
         private void _thumbnailToolbarSkip_Click(object sender, ThumbnailButtonClickedEventArgs e)
         {
             Next();
@@ -843,6 +801,8 @@ namespace Elpis
 
         private async Task FinalLoad()
         {
+            if (Interlocked.Exchange(ref _finalLoadOnce, 1) == 1) return; // already ran
+
             Version ver = Assembly.GetEntryAssembly().GetName().Version;
             if (_config.Fields.Elpis_Version == null || _config.Fields.Elpis_Version < ver)
             {
@@ -914,13 +874,13 @@ namespace Elpis
             {
                 _keyHost = new HotKeyHost(this);
                 ConfigureHotKeys();
-                SetupJumpList();
+                //SetupJumpListSafe();
                 SetupNotifyIcon();
                 mainBar.DataContext = _player; // To bind playstate
                 SetupPages();
                 SetupUIEvents();
                 SetupPageEvents();
-                SetupThumbnailToolbarButtons();
+                //SetupThumbnailToolbarButtonsSafe();
             });
 
             //this.Dispatch(SetupJumpList);
@@ -953,6 +913,8 @@ namespace Elpis
 
         public void ShowPage(UserControl control)
         {
+            if (ReferenceEquals(cntCtrl.Content, control))
+                return; // prevents a second Loaded
             CurrentPage = control;
             if (control == _playlistPage)
             {
@@ -960,7 +922,8 @@ namespace Elpis
                 SettingsPage.IsSelected = false;
                 ContentGrid.RowDefinitions[2].Height = new GridLength(75);
             }
-            this.Dispatch(() => cntCtrl.Content = control);
+            Dispatcher.Invoke(() => cntCtrl.Content = control);
+
         }
 
 
@@ -983,23 +946,44 @@ namespace Elpis
 
         private void StartWebServer()
         {
-            if (_config.Fields.Elpis_RemoteControlEnabled)
+            bool created = false;
+            var existing = _webInterface;
+
+            if (existing == null)
             {
-                _webInterfaceObject = new WebInterface();
-                Thread webInterfaceThread = new Thread(new ThreadStart(_webInterfaceObject.StartInterface));
-                webInterfaceThread.Start();
-                lastTimeSkipped = DateTime.Now;
+                var candidate = new WebInterface();
+                existing = Interlocked.CompareExchange(ref _webInterface, candidate, null);
+                if (existing == null)
+                {
+                    existing = candidate;
+                    created = true;
+                }
+            }
+
+            if (created)
+            {
+                var t = new Thread(existing.StartInterface)
+                {
+                    IsBackground = true,
+                    Name = "Elpis.WebInterface"
+                };
+                t.SetApartmentState(ApartmentState.MTA); // just use the enum directly
+                t.Start();
             }
         }
 
+
+        // Stop safely and only once
         private void StopWebServer()
         {
-            if (_config.Fields.Elpis_RemoteControlEnabled)
+            try
             {
-                if (_webInterfaceObject != null)
-                {
-                    _webInterfaceObject.StopInterface();
-                }
+                var wi = Interlocked.Exchange(ref _webInterface, null);
+                wi?.StopInterface(); // inside, make StopInterface idempotent with its own try/catch
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("StopWebServer failed: " + ex);
             }
         }
 
@@ -1099,14 +1083,16 @@ namespace Elpis
 
 
             // if (_config.Fields.Proxy_Address != string.Empty)
-                // _scrobbler.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-                //         _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
+            // _scrobbler.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
+            //         _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
 
             _player.RegisterPlayerControlQuery(_scrobbler);
         }
 
         private async Task LoadLogic()
         {
+            if (Interlocked.Exchange(ref _loadLogicOnce, 1) == 1) return;
+
             bool foundNewUpdate = false;
             if (InitLogic())
             {
@@ -1167,34 +1153,74 @@ namespace Elpis
             return (IsActive && CurrentPage == _playlistPage);
         }
 
-        private void SetupJumpList()
+
+        private void SetupJumpListSafe()
         {
-            System.Windows.Shell.JumpList jumpList = new System.Windows.Shell.JumpList();
-            jumpList.ShowRecentCategory = true;
-            System.Windows.Shell.JumpList.SetJumpList(System.Windows.Application.Current, jumpList);
+            try
+            {
+                if (!TaskbarManager.IsPlatformSupported)
+                    return;
 
-            JumpTask pause = JumpListManager.createJumpTask(PlayerCommands.PlayPause, "--playpause", 1);
-            jumpList.JumpItems.Add(pause);
+                var app = System.Windows.Application.Current; // << fully qualified
 
-            JumpTask next = JumpListManager.createJumpTask(PlayerCommands.Next, "--next", 2);
-            jumpList.JumpItems.Add(next);
+                if (app == null) return;
 
-            JumpTask thumbsUp = JumpListManager.createJumpTask(PlayerCommands.ThumbsUp, "--thumbsup", 3);
-            jumpList.JumpItems.Add(thumbsUp);
+                var jl = new System.Windows.Shell.JumpList { ShowRecentCategory = true };
+                System.Windows.Shell.JumpList.SetJumpList(app, jl);
 
-            JumpTask thumbsDown = JumpListManager.createJumpTask(PlayerCommands.ThumbsDown, "--thumbsdown", 4);
-            jumpList.JumpItems.Add(thumbsDown);
+                jl.JumpItems.Add(JumpListManager.createJumpTask(PlayerCommands.PlayPause, "--playpause", 1));
+                jl.JumpItems.Add(JumpListManager.createJumpTask(PlayerCommands.Next, "--next", 2));
+                jl.JumpItems.Add(JumpListManager.createJumpTask(PlayerCommands.ThumbsUp, "--thumbsup", 3));
+                jl.JumpItems.Add(JumpListManager.createJumpTask(PlayerCommands.ThumbsDown, "--thumbsdown", 4));
+                jl.JumpItems.Add(JumpListManager.createJumpTask("Exit Elpis", "Exits Elpis", "--exit", 0));
 
-            JumpTask exitElpis = JumpListManager.createJumpTask("Exit Elpis", "Exits Elpis", "--exit", 0);
-            jumpList.JumpItems.Add(exitElpis);
-
-            jumpList.Apply();
+                jl.Apply();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("SetupJumpListSafe failed: " + ex);
+            }
         }
 
+        private void SetupThumbnailToolbarButtonsSafe()
+        {
+            try
+            {
+                if (_thumbButtonsAdded) return;
+                if (!TaskbarManager.IsPlatformSupported) return;
 
+                var handle = (new WindowInteropHelper(this)).Handle;
+                if (handle == IntPtr.Zero) return;  // no HWND yet
+
+                _thumbnailToolbarThumbUp = new ThumbnailToolbarButton(Properties.Resources.thumbs_up_icon, "Thumb Up");
+                _thumbnailToolbarThumbDown = new ThumbnailToolbarButton(Properties.Resources.thumbs_down_icon, "Thumb Down");
+                _thumbnailToolbarPlayPause = new ThumbnailToolbarButton(Properties.Resources.play_pause, "Play/Pause");
+                _thumbnailToolbarSkip = new ThumbnailToolbarButton(Properties.Resources.skip_song, "Skip");
+
+                TaskbarManager.Instance.ThumbnailToolbars.AddButtons(
+                    handle,
+                    _thumbnailToolbarThumbUp, _thumbnailToolbarPlayPause, _thumbnailToolbarSkip, _thumbnailToolbarThumbDown
+                );
+
+                _thumbnailToolbarThumbUp.Click += _thumbnailToolbarThumbUp_Click;
+                _thumbnailToolbarThumbDown.Click += _thumbnailToolbarThumbDown_Click;
+                _thumbnailToolbarPlayPause.Click += _thumbnailToolbarPlayPause_Click;
+                _thumbnailToolbarSkip.Click += _thumbnailToolbarSkip_Click;
+
+                _thumbButtonsAdded = true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("SetupThumbnailToolbarButtonsSafe failed: " + ex);
+                // swallow – not fatal
+            }
+        }
+
+        private bool _hotkeysConfigured;
         private void ConfigureHotKeys()
         {
-
+            if (_hotkeysConfigured) return;
+            // clear existing add dedupe
             foreach (HotKey h in _config.Fields.Elpis_HotKeys.Values)
             {
                 _keyHost.AddHotKey(h);
@@ -1218,6 +1244,8 @@ namespace Elpis
             _config.Fields.Elpis_HotKeys = keys;
 
             _config.SaveConfig();
+
+            _hotkeysConfigured = true;
         }
 
         public void ShowStationList()
@@ -1314,20 +1342,6 @@ namespace Elpis
                 _lastException = null;
                 RestorePrevPage();
                 _showingError = false;
-            }
-        }
-
-        private void _updatePage_UpdateSelectionEvent(bool status)
-        {
-            if (status && _update.DownloadUrl != string.Empty)
-            {
-                //Process.Start(_update.DownloadUrl);
-                _forceClose = true;
-                Close();
-            }
-            else
-            {
-                ShowPage(_loadingPage);
             }
         }
 
@@ -1602,44 +1616,83 @@ namespace Elpis
             }
         }
 
-        private void Window_Loaded(object sender, RoutedEventArgs e)
+        private void UnregisterHotkeysSafe()
         {
-            Task.Factory.StartNew(LoadLogic);
-        }
+            try
+            {
+                if (_keyHost == null) return;
 
-        private void transitionControl_CurrentPageSet(UserControl page)
-        {
-            if (page == _loadingPage && _initComplete && !_finalComplete)
-                Task.Factory.StartNew(FinalLoad);
+                // If HotKeyHost exposes a HotKeys dictionary and RemoveHotKey(HotKey),
+                // remove them one-by-one (prevents lingering global registrations).
+                var keys = _keyHost.HotKeys?.Values?.ToList();
+                if (keys != null)
+                {
+                    foreach (var hk in keys)
+                    {
+                        try { _keyHost.RemoveHotKey(hk); } catch { /* ignore */ }
+                    }
+                }
+
+                // If HotKeyHost implements IDisposable, dispose it as well.
+                (_keyHost as IDisposable)?.Dispose();
+                _keyHost = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("UnregisterHotkeysSafe failed: " + ex);
+                // Swallow exceptions on shutdown.
+            }
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
         {
-            if (!_forceClose && _config.Fields.Elpis_MinimizeToTray && !_restarting)
-            {
-                WindowState = WindowState.Minimized;
-                this.Hide();
-                ShowInTaskbar = false;
+            // If we're going to cancel (minimize to tray), don't lock out future closes.
+            bool willMinimizeToTray = !_forceClose && _config?.Fields.Elpis_MinimizeToTray == true && !_restarting;
 
+            if (willMinimizeToTray)
+            {
+                // Do NOT stop the web server; keep app services alive in tray.
+                // Also do NOT set _closing here; or reset it if already set.
+                if (Interlocked.Exchange(ref _closing, 0) != 0)
+                    _closing = 0;
+
+                WindowState = WindowState.Minimized;
+                Hide();
+                ShowInTaskbar = false;
                 e.Cancel = true;
                 return;
             }
 
-            if (_notify != null)
-            {
-                _notify.Dispose();
-                _notify = null;
-            }
+            // Real shutdown path (not minimizing)
+            if (Interlocked.Exchange(ref _closing, 1) == 1) return;
 
-            if (_config != null)
+            try
             {
-                _config.Fields.Elpis_StartupLocation = new Point(this.Left, this.Top);
-                _config.Fields.Elpis_StartupSize = new Size(this.Width, this.Height);
-                if (_player != null)
-                    _config.Fields.Elpis_Volume = _player.Volume;
-                _config.SaveConfig();
+                // Unregister
+                // only on actual exit
+                UnregisterHotkeysSafe();
+
+                // Dispose tray icon
+                _notify?.Dispose();
+                _notify = null;
+
+                // Persist config
+                if (_config != null)
+                {
+                    _config.Fields.Elpis_StartupLocation = new Point(Left, Top);
+                    _config.Fields.Elpis_StartupSize = new Size(Width, Height);
+                    if (_player != null)
+                        _config.Fields.Elpis_Volume = _player.Volume;
+                    _config.SaveConfig();
+                }
+
+                // Stop the web server ONCE, safely
+                StopWebServer(); // make this idempotent (shown below)
             }
-            StopWebServer();
+            finally
+            {
+                // nothing else
+            }
         }
 
         private void Window_StateChanged(object sender, EventArgs e)

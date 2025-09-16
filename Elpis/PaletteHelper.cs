@@ -13,32 +13,44 @@ namespace Elpis
 {
     public class PaletteHelper
     {
+        private static readonly Regex MdixBaseRegex =
+            new Regex(@"MaterialDesignThemes\.Wpf;component/Themes/MaterialDesignTheme\.(Light|Dark)\.xaml",
+                      RegexOptions.IgnoreCase);
+
+        private static readonly Regex MahAppsBaseRegex =
+            new Regex(@"MahApps\.Metro;component/Styles/Accents/Base(Light|Dark)\.xaml",
+                      RegexOptions.IgnoreCase);
+
         public virtual void SetLightDark(bool isDark)
         {
-            var existingResourceDictionary = Application.Current.Resources.MergedDictionaries
-                .Where(rd => rd.Source != null)
-                .SingleOrDefault(rd => Regex.Match(rd.Source.OriginalString, @"(\/MaterialDesignThemes.Wpf;component\/Themes\/MaterialDesignTheme\.)((Light)|(Dark))").Success);
-            if (existingResourceDictionary == null)
-                throw new ApplicationException("Unable to find Light/Dark base theme in Application resources.");
+            var dicts = Application.Current.Resources.MergedDictionaries;
 
-            var source =
-                $"pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.{(isDark ? "Dark" : "Light")}.xaml";
-            var newResourceDictionary = new ResourceDictionary() { Source = new Uri(source) };
+            // 1) Remove ALL existing MDIX base theme dictionaries
+            var mdixMatches = dicts.Where(d => d.Source != null && MdixBaseRegex.IsMatch(d.Source.OriginalString)).ToList();
+            for (int i = 0; i < mdixMatches.Count; i++) dicts.Remove(mdixMatches[i]);
 
-            Application.Current.Resources.MergedDictionaries.Remove(existingResourceDictionary);
-            Application.Current.Resources.MergedDictionaries.Add(newResourceDictionary);
+            // 2) Add the one we want
+            var newMdix = new ResourceDictionary
+            {
+                Source = new Uri(
+                    "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme."
+                    + (isDark ? "Dark" : "Light") + ".xaml",
+                    UriKind.Absolute)
+            };
+            dicts.Add(newMdix);
 
-            var existingMahAppsResourceDictionary = Application.Current.Resources.MergedDictionaries
-                .Where(rd => rd.Source != null)
-                .SingleOrDefault(rd => Regex.Match(rd.Source.OriginalString, @"(\/MahApps.Metro;component\/Styles\/Accents\/)((BaseLight)|(BaseDark))").Success);
-            if (existingMahAppsResourceDictionary == null) return;
+            // 3) (Optional) Sync MahApps base theme the same way
+            var mahMatches = dicts.Where(d => d.Source != null && MahAppsBaseRegex.IsMatch(d.Source.OriginalString)).ToList();
+            for (int i = 0; i < mahMatches.Count; i++) dicts.Remove(mahMatches[i]);
 
-            source =
-                $"pack://application:,,,/MahApps.Metro;component/Styles/Accents/{(isDark ? "BaseDark" : "BaseLight")}.xaml";
-            var newMahAppsResourceDictionary = new ResourceDictionary { Source = new Uri(source) };
-
-            Application.Current.Resources.MergedDictionaries.Remove(existingMahAppsResourceDictionary);
-            Application.Current.Resources.MergedDictionaries.Add(newMahAppsResourceDictionary);
+            var newMah = new ResourceDictionary
+            {
+                Source = new Uri(
+                    "pack://application:,,,/MahApps.Metro;component/Styles/Accents/"
+                    + (isDark ? "BaseDark" : "BaseLight") + ".xaml",
+                    UriKind.Absolute)
+            };
+            dicts.Add(newMah);
         }
 
         /// <summary>
@@ -212,7 +224,7 @@ namespace Elpis
                 .SelectMany(d => GetEntries(d).Select(e => new { d, e }))
                 .Where(a => a.e.Value is SolidColorBrush)
                 .GroupBy(a => (SolidColorBrush)a.e.Value)
-                .SingleOrDefault(g => g.First().e.Key.Equals(name));
+                .FirstOrDefault(g => g.First().e.Key.Equals(name));
             if (group == null)
                 throw new InvalidOperationException($"Unable to safely determine a single resource definition for {name}.");
             var solidColorBrush = group.First().e.Value as SolidColorBrush;

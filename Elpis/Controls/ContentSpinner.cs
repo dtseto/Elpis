@@ -135,7 +135,7 @@ namespace Elpis.Controls
             if (_content == null)
                 return;
 
-            DoubleAnimationUsingKeyFrames animation = GetAnimation();
+            DoubleAnimation animation = GetAnimation();
 
             _content.LayoutTransform = GetContentLayoutTransform();
             _content.RenderTransform = GetContentRenderTransform();
@@ -150,13 +150,16 @@ namespace Elpis.Controls
 
         public void StopAnimation()
         {
-            if (_storyboard != null)
-            {
-                _storyboard.Stop();
-                _storyboard.Remove(this);
-                _storyboard = null;
-                _running = false;
-            }
+            if (_storyboard == null) return;
+
+            try { _storyboard.Stop(this); }      // match Begin(this, true)
+            catch { /* ignore */ }
+
+            try { _storyboard.Remove(this); }
+            catch { /* ignore */ }
+
+            _storyboard = null;
+            _running = false;
         }
 
         private void RestartAnimation()
@@ -182,27 +185,23 @@ namespace Elpis.Controls
             return rotateTransform;
         }
 
-        private DoubleAnimationUsingKeyFrames GetAnimation()
+        private DoubleAnimation GetAnimation()
         {
+            // Ensure this control has its own name scope
             NameScope.SetNameScope(this, new NameScope());
 
-            var animation = new DoubleAnimationUsingKeyFrames();
-
-            for (int i = 0; i < NumberOfFrames; i++)
+            var anim = new DoubleAnimation
             {
-                double angle = i*360.0/NumberOfFrames;
-                KeyTime time = KeyTime.FromPercent(((double) i)/NumberOfFrames);
-                DoubleKeyFrame frame = new DiscreteDoubleKeyFrame(angle, time);
-                animation.KeyFrames.Add(frame);
-            }
+                From = 0,
+                To = 360,
+                Duration = TimeSpan.FromSeconds(1 / RevolutionsPerSecond),
+                RepeatBehavior = RepeatBehavior.Forever
+            };
 
-            animation.Duration = TimeSpan.FromSeconds(1/RevolutionsPerSecond);
-            animation.RepeatBehavior = RepeatBehavior.Forever;
+            Storyboard.SetTargetName(anim, ANIMATION);
+            Storyboard.SetTargetProperty(anim, new PropertyPath(RotateTransform.AngleProperty));
 
-            Storyboard.SetTargetName(animation, ANIMATION);
-            Storyboard.SetTargetProperty(animation, new PropertyPath(RotateTransform.AngleProperty));
-
-            return animation;
+            return anim;
         }
 
         #region Validation and prop change methods

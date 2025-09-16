@@ -10,24 +10,28 @@
         mc:Ignorable="d" 
         Height="650" 
         Width="1200" 
+        
+        MinWidth="400"
+        MinHeight="500"
+        SizeToContent="Manual"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="Auto"
         TextElement.Foreground="{DynamicResource MaterialDesignBody}"
         TextElement.FontWeight="Medium"
-        TextOptions.TextFormattingMode="Ideal" 
-        TextOptions.TextRenderingMode="Auto"
         TextElement.FontSize="14"
         Background="#191c1f"
         FontFamily="{StaticResource MaterialDesignFont}"
         WindowStartupLocation="CenterScreen" 
-        WindowStyle="None"
         WindowState="Normal"
         Icon="/Elpis;component/Images/main_icon.png" 
-        Loaded="Window_Loaded" 
         Closing="Window_Closing"
-        StateChanged="Window_StateChanged" ResizeMode="CanResizeWithGrip">
+        StateChanged="Window_StateChanged" ResizeMode="CanResizeWithGrip" WindowStyle="None">
     <WindowChrome.WindowChrome>
         <WindowChrome 
         CaptionHeight="0"
-        ResizeBorderThickness="5" />
+        ResizeBorderThickness="{x:Static SystemParameters.WindowResizeBorderThickness}" />
     </WindowChrome.WindowChrome>
     <Window.CommandBindings>
         <CommandBinding Command="{x:Static  hotkeys:PlayerCommands.PlayPause}"
@@ -59,13 +63,13 @@
                             <materialDesign:PackIcon Kind="ArrowLeft" HorizontalAlignment="Center" VerticalAlignment="Center" Width="25" Height="25"/>
                         </Button>
                         <ListView x:Name="ListViewMenu" Foreground="#FF5C99D6" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="ListViewMenu_SelectionChanged">
-                            <ListViewItem x:Name="NowPlaying" Height="0" Visibility="Hidden">
+                            <ListViewItem x:Name="NowPlaying" Height="0" Visibility="Collapsed">
                                 <StackPanel Orientation="Horizontal">
                                     <materialDesign:PackIcon Kind="PlayArrow" Height="25" Width="25" Margin="10"/>
                                     <TextBlock Text="Now Playing" VerticalAlignment="Center" Margin="20 10"/>
                                 </StackPanel>
                             </ListViewItem>
-                            <ListViewItem x:Name="HistoryPage" Height="0" Visibility="Hidden">
+                            <ListViewItem x:Name="HistoryPage" Height="0" Visibility="Collapsed">
                                 <StackPanel Orientation="Horizontal">
                                     <materialDesign:PackIcon Kind="History" Height="25" Width="25" Margin="10"/>
                                     <TextBlock Text="History" VerticalAlignment="Center" Margin="20 10"/>
@@ -116,9 +120,9 @@
 
                 <Grid x:Name="ContentGrid">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="29*"/>
-                        <RowDefinition Height="500*"/>
-                        <RowDefinition Height="0*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <ContentControl Grid.Row="1" x:Name="cntCtrl" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
                     <Grid x:Name="TitleBar" Height="29" Grid.Row="0" VerticalAlignment="Top" Background="{StaticResource MainBGBrush}">

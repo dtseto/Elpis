@@ -6,7 +6,6 @@
              TextElement.Foreground="{DynamicResource MaterialDesignBody}"
              TextElement.FontWeight="Medium"
              TextElement.FontSize="14"
-             FontFamily="pack://application:,,,/MaterialDesignThemes.Wpf;component/Resources/Roboto/#Roboto"
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes" 
              mc:Ignorable="d" d:DesignWidth="400">
     <UserControl.Resources>
@@ -126,9 +125,8 @@
             </Button>
         </Grid>
         <Grid Grid.Column="2" Name="gridError" Style="{StaticResource GridFade}"
-              Visibility="Hidden">
+              Visibility="Collapsed">
             <Button
-                Style="{StaticResource MaterialDesignFloatingActionDarkButton}"
                 ToolTip="Error"
                 Click="btnError_Click"
                 Grid.Column="2" 
@@ -144,7 +142,7 @@
                 Width="30"/>
             </Button>
         </Grid>
-        <Grid Name="gridVolume" Grid.Column="1" Grid.ColumnSpan="3" Visibility="Hidden"
+        <Grid Name="gridVolume" Grid.Column="1" Grid.ColumnSpan="3" Visibility="Collapsed"
               MouseLeave="gridVolume_MouseLeave"
               MouseEnter="gridVolume_MouseEnter"
               Style="{StaticResource VolumeFade}">

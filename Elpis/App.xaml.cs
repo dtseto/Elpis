@@ -1,11 +1,14 @@
-﻿using System;
+﻿using Microsoft.Shell;
+using NDesk.Options;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
 using System.Windows;
 using System.Windows.Input;
-using Microsoft.Shell;
-using NDesk.Options;
 using Util;
-using System.IO;
+
 
 namespace Elpis
 {
@@ -14,19 +17,22 @@ namespace Elpis
     /// </summary>
     public partial class App : Application, ISingleInstanceApp
     {
-
         [STAThread]
         public static void Main()
         {
-            if (SingleInstance<App>.InitializeAsFirstInstance("ElpisInstance"))
+            // Unique app key (stable across builds)
+            const string appKey = "ElpisInstance";
+
+            if (SingleInstance<App>.InitializeAsFirstInstance(appKey))
             {
                 var application = new App();
-                application.Init();
+                application.InitializeComponent();   // loads App.xaml (StartupUri respected)
                 application.Run();
 
-                // Allow single instance code to perform cleanup operations
+                // cleanup when the first instance exits
                 SingleInstance<App>.Cleanup();
             }
+            // else: SingleInstance will signal the running instance via SignalExternalCommandLineArgs
         }
 
         public void Init()
@@ -35,45 +41,73 @@ namespace Elpis
         }
 
         protected override void OnStartup(StartupEventArgs e)
-        {       
+        {
+
+            AppDomain.CurrentDomain.UnhandledException += (s, ex) =>
+    Debug.WriteLine("UnhandledException: " + ex.ExceptionObject);
+            DispatcherUnhandledException += (s, ex) =>
+            {
+                Debug.WriteLine("DispatcherUnhandledException: " + ex.Exception);
+                ex.Handled = true; // don’t crash the UI thread
+            };
+
+
             base.OnStartup(e);
-            HandleCommandLine(System.Environment.GetCommandLineArgs());
-            if(Elpis.MainWindow._clo.ShowHelp)
-                Application.Current.Shutdown();
+
+            // Process the first instance's args
+            //HandleCommandLine(Environment.GetCommandLineArgs());
+
+            //if (Elpis.MainWindow._clo.ShowHelp)
+            //   Current.Shutdown();
+
+            var ok = HandleCommandLine(Environment.GetCommandLineArgs());
+                if (!ok)
+                    {
+                Current.Shutdown();   // we already showed help
+                        return;
+                    }
+        }
+
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            //_instanceMutex?.ReleaseMutex();
+           // _instanceMutex = null;
+            base.OnExit(e);
         }
 
         private void ShowHelp(OptionSet optionSet, string msg = null)
         {
-            StringWriter sw = new StringWriter();
-            optionSet.WriteOptionDescriptions(sw);
-            string output = sw.ToString();
-            if(msg != null)
-                output += "\r\n\r\n" + msg;
-            MessageBox.Show(output, "Elpis Options");
-        }
+            using (var sw = new StringWriter())
+            {
+                optionSet.WriteOptionDescriptions(sw);
+                var output = sw.ToString();
+                if (msg != null)
+                    output += "\r\n\r\n" + msg;
 
+                MessageBox.Show(output, "Elpis Options");
+            }
+        }
+        // ---- CLI handling ----
         public bool HandleCommandLine(IList<string> args)
         {
-            CommandLineOptions clo = new CommandLineOptions();
-            OptionSet p = new OptionSet()
-               .Add("c|config=", "a {CONFIG} file to load ", delegate(string v) { clo.ConfigPath = v; })
-               .Add("h|?|help", "show this message and exit", delegate(string v) { clo.ShowHelp = v != null; })
-               .Add("playpause", "toggles playback", delegate(string v) { clo.TogglePlayPause = v != null; })
-               .Add("next", "skips current track", delegate(string v) { clo.SkipTrack = v != null; })
-               .Add("thumbsup", "rates the song as suitable for this station", delegate(string v) { clo.DoThumbsUp = v != null; })
-               .Add("thumbsdown", "rates the song as unsuitable for this station", delegate(string v) { clo.DoThumbsDown = v != null; })
-               .Add("s|station=", "starts station \"{STATIONNAME}\" - puts quotes around station names with spaces", delegate(string v) { clo.StationToLoad = v; })
-               .Add("exit|quit", "exits Elpis", delegate(string v) { clo.Exit = v != null; });
+            var clo = new CommandLineOptions();
+            var p = new OptionSet()
+               .Add("c|config=", "a {CONFIG} file to load", v => clo.ConfigPath = v)
+               .Add("h|?|help", "show this message and exit", v => clo.ShowHelp = v != null)
+               .Add("playpause", "toggles playback", v => clo.TogglePlayPause = v != null)
+               .Add("next", "skips current track", v => clo.SkipTrack = v != null)
+               .Add("thumbsup", "like (thumbs up) current song", v => clo.DoThumbsUp = v != null)
+               .Add("thumbsdown", "dislike (thumbs down) current", v => clo.DoThumbsDown = v != null)
+               .Add("s|station=", "starts station \"{STATIONNAME}\"", v => clo.StationToLoad = v)
+               .Add("exit|quit", "exits Elpis", v => clo.Exit = v != null);
 
-            try
-            {
-                p.Parse(args);
-            }
-            catch (OptionException e)
+            try { p.Parse(args); }
+            catch (OptionException ex)
             {
                 clo.ShowHelp = true;
-                Elpis.MainWindow.SetCommandLine(clo);
-                ShowHelp(p, e.Message);
+                //Elpis.MainWindow.SetCommandLine(clo);
+                ShowHelp(p, ex.Message);
             }
 
             Elpis.MainWindow.SetCommandLine(clo);
@@ -81,29 +115,30 @@ namespace Elpis
             if (clo.ShowHelp)
             {
                 ShowHelp(p);
-            }
-            else
-            {
-                if (MainWindow != null)
-                {
-                    ((Elpis.MainWindow)MainWindow).DoCommandLine();
-                }
+                //}
+                //else if (Current?.MainWindow is Elpis.MainWindow mw)
+                //{
+                //    mw.DoCommandLine();
+                return false;
             }
 
             return true;
         }
 
+
         #region ISingleInstanceApp Members
+        // Called in the first instance when a 2nd instance launches.
         public bool SignalExternalCommandLineArgs(IList<string> args)
         {
-            //only bring app to front if called with no arguments.  If argument was passed assume user
-            //is calling exe for control purposes only and does not want the app to be brought to front
-            if (args.Count == 1)
+            // If no args, bring to front; otherwise assume “control only”
+            if (args.Count <= 1 && Current?.MainWindow is Elpis.MainWindow mw)
             {
-                ((Elpis.MainWindow)MainWindow).Show();
-                ((Elpis.MainWindow)MainWindow).Activate();
-                ((Elpis.MainWindow)MainWindow).WindowState = WindowState.Normal;
-                ((Elpis.MainWindow)MainWindow).ShowInTaskbar = true;
+                mw.ShowInTaskbar = true;
+                mw.Show();
+                if (mw.WindowState == WindowState.Minimized) mw.WindowState = WindowState.Normal;
+                mw.Activate();
+                mw.Topmost = true; mw.Topmost = false; // z-order nudge
+                mw.Focus();
             }
 
             return HandleCommandLine(args);

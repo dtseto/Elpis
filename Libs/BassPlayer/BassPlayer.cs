@@ -68,6 +68,32 @@ namespace BassPlayer
     public class BassAudioEngine : IDisposable // : IPlayer
     {
 
+        // new for singelton below
+        // Add this private static field to hold the single instance
+        private static BassAudioEngine _instance = null;
+
+        // Add this public static property to get the single instance
+        public static BassAudioEngine Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    _instance = new BassAudioEngine();
+                }
+                return _instance;
+            }
+        }
+        // Make the constructor private to prevent direct instantiation
+        private BassAudioEngine()
+        {
+            Log.Debug("BASS TRACE: BassAudioEngine() constructor called.");
+            BassNet.Registration("your-email@your-domain.com", "2X2013824330");
+            //_is64Bit = (IntPtr.Size == 8);
+        }
+
+
+
         // 🔒 Put these at the top of the class, with your other fields
         private readonly object _bassInitLock = new object();
 
@@ -525,13 +551,13 @@ namespace BassPlayer
 
         #region Constructors/Destructors
 
-        public BassAudioEngine(string email = "", string key = "")
-        {
-            _regEmail = email;
-            _regKey = key;
-
-            Initialize();
-        }
+        //public BassAudioEngine(string email = "", string key = "")
+        //{
+        //    _regEmail = email;
+        //    _regKey = key;
+         //   Initialize();
+         //   Log.Debug("BASS TRACE: public BassAudioEngine() constructor called.");
+        //}
 
         #endregion
 
@@ -934,7 +960,7 @@ namespace BassPlayer
         /// <param name="e"></param>
         private void OnUpdateTimerTick(object sender, EventArgs e)
         {
-            Log.Debug("BASS: UpdateTimerTick fired. Getting progress.");
+            //Log.Debug("BASS: UpdateTimerTick fired. Getting progress.");
             GetProgressInternal();
         }
 
@@ -1036,6 +1062,9 @@ namespace BassPlayer
                     return false;
                 }
 
+                // Always free the current stream before playing a new one.
+                FreeCurrentStream();
+
                 try
                 {
                     UpdateTimer.Stop();
@@ -1114,15 +1143,15 @@ namespace BassPlayer
                     if (newStreamHandle != 0)
                     {
                         // Stop and free the current stream if one is playing or paused.
-                        if (_currentStreamHandle != 0)
-                        {
+                        //if (_currentStreamHandle != 0)
+                        //{
                             //
                             //Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
                             // Bass.BASS_ChannelStop(_currentStreamHandle);
                             //Bass.BASS_StreamFree(_currentStreamHandle);
-                            Stop(true); // true for songSkipped
+                           // Stop(true); // true for songSkipped
 
-                        }
+                        //}
 
                         _currentStreamHandle = newStreamHandle;
 
@@ -1172,8 +1201,11 @@ namespace BassPlayer
                     }
                     else
                     {
-                        Bass.BASS_StreamFree(_currentStreamHandle);
-                        _currentStreamHandle = 0;
+                        // This is where you would handle an error after creating a stream but before playing.
+                        // The new FreeCurrentStream() method handles this now.
+                        //FreeCurrentStream();
+                        //Bass.BASS_StreamFree(_currentStreamHandle);
+                       // _currentStreamHandle = 0;
                     }
                 }
                 catch (Exception ex)
@@ -1716,6 +1748,35 @@ private void HandleSongEnded(bool bManualStop, bool songSkipped = false)
             FinalizeDownloadStream();
             _CrossFading = false;
         }
+
+        private void FreeCurrentStream()
+        {
+            if (_currentStreamHandle != 0)
+            {
+                Log.Debug($"BASS: FreeCurrentStream() called. Freeing handle {_currentStreamHandle}.");
+
+                // Remove all registered syncs for the stream
+                if (_streamSyncHandles.ContainsKey(_currentStreamHandle))
+                {
+                    foreach (int syncHandle in _streamSyncHandles[_currentStreamHandle])
+                    {
+                        // CORRECTED: Pass both the channel handle and the sync handle
+                        Bass.BASS_ChannelRemoveSync(_currentStreamHandle, syncHandle);
+                    }
+                    _streamSyncHandles.Remove(_currentStreamHandle);
+                }
+
+                Bass.BASS_StreamFree(_currentStreamHandle);
+                _currentStreamHandle = 0;
+            }
+        }
+
+
+
+
+
+
+
 
 
         /// <summary>

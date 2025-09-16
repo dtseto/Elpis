@@ -159,7 +159,8 @@ namespace PandoraSharpPlayer
             _pandora.StationsUpdatingEvent += _pandora_StationsUpdatingEvent;
             _pandora.QuickMixSavedEvent += _pandora_QuickMixSavedEvent;
 
-            _bass = new BassAudioEngine(bassRegEmail, bassRegKey);
+            //_bass = new BassAudioEngine(bassRegEmail, bassRegKey);
+            _bass = BassAudioEngine.Instance;
             _bass.PlaybackProgress += bass_PlaybackProgress;
             _bass.PlaybackStateChanged += bass_PlaybackStateChanged;
             _bass.PlaybackStart += bass_PlaybackStart;

@@ -68,32 +68,6 @@ namespace BassPlayer
     public class BassAudioEngine : IDisposable // : IPlayer
     {
 
-        // new for singelton below
-        // Add this private static field to hold the single instance
-        private static BassAudioEngine _instance = null;
-
-        // Add this public static property to get the single instance
-        public static BassAudioEngine Instance
-        {
-            get
-            {
-                if (_instance == null)
-                {
-                    _instance = new BassAudioEngine();
-                }
-                return _instance;
-            }
-        }
-        // Make the constructor private to prevent direct instantiation
-        private BassAudioEngine()
-        {
-            Log.Debug("BASS TRACE: BassAudioEngine() constructor called.");
-            BassNet.Registration("your-email@your-domain.com", "2X2013824330");
-            //_is64Bit = (IntPtr.Size == 8);
-        }
-
-
-
         // 🔒 Put these at the top of the class, with your other fields
         private readonly object _bassInitLock = new object();
 
@@ -356,26 +330,6 @@ namespace BassPlayer
         }
 
         /// <summary>
-        /// Centralized method to manage the player's state and fire the associated event.
-        /// </summary>
-        private void SetState(PlayState newState)
-        {
-            if (_State == newState)
-            {
-                return; // State has not changed, do nothing.
-            }
-
-            PlayState oldState = _State;
-            _State = newState;
-
-            // Fire the event, notifying any subscribers of the change.
-            if (PlaybackStateChanged != null)
-            {
-                PlaybackStateChanged(this, oldState, newState);
-            }
-        }
-
-        /// <summary>
         /// Has the Playback Ended?
         /// </summary>
         public bool Ended
@@ -551,13 +505,13 @@ namespace BassPlayer
 
         #region Constructors/Destructors
 
-        //public BassAudioEngine(string email = "", string key = "")
-        //{
-        //    _regEmail = email;
-        //    _regKey = key;
-         //   Initialize();
-         //   Log.Debug("BASS TRACE: public BassAudioEngine() constructor called.");
-        //}
+        public BassAudioEngine(string email = "", string key = "")
+        {
+            _regEmail = email;
+            _regKey = key;
+
+            Initialize();
+        }
 
         #endregion
 
@@ -950,7 +904,7 @@ namespace BassPlayer
 
         public void GetProgress()
         {
-            //Task.Factory.StartNew(GetProgressInternal);
+            Task.Factory.StartNew(GetProgressInternal);
         }
 
         /// <summary>
@@ -960,7 +914,6 @@ namespace BassPlayer
         /// <param name="e"></param>
         private void OnUpdateTimerTick(object sender, EventArgs e)
         {
-            //Log.Debug("BASS: UpdateTimerTick fired. Getting progress.");
             GetProgressInternal();
         }
 
@@ -1062,9 +1015,6 @@ namespace BassPlayer
                     return false;
                 }
 
-                // Always free the current stream before playing a new one.
-                FreeCurrentStream();
-
                 try
                 {
                     UpdateTimer.Stop();
@@ -1078,7 +1028,7 @@ namespace BassPlayer
                 bool result = false;
 
                 // Handle the case of resuming a paused song first.
-                if (_State == PlayState.Paused && string.Equals(filePath, FilePath, StringComparison.OrdinalIgnoreCase) && _currentStreamHandle != 0)
+                if (_State == PlayState.Paused && filePath.ToLower().CompareTo(FilePath.ToLower()) == 0 && _currentStreamHandle != 0)
                 {
                     if (_SoftStop)
                     {
@@ -1093,7 +1043,7 @@ namespace BassPlayer
 
                     if (result)
                     {
-                        SetState(PlayState.Playing);
+                        _State = PlayState.Playing;
                         UpdateTimer.Start();
                         if (PlaybackStateChanged != null)
                         {
@@ -1102,7 +1052,8 @@ namespace BassPlayer
                     }
                     return result;
                 }
-                SetState(PlayState.Init);
+
+                _State = PlayState.Init;
 
                 try
                 {
@@ -1143,15 +1094,15 @@ namespace BassPlayer
                     if (newStreamHandle != 0)
                     {
                         // Stop and free the current stream if one is playing or paused.
-                        //if (_currentStreamHandle != 0)
-                        //{
+                        if (_currentStreamHandle != 0)
+                        {
                             //
                             //Log.Debug($"BASS: Stopping and freeing old stream: {_currentStreamHandle}");
                             // Bass.BASS_ChannelStop(_currentStreamHandle);
                             //Bass.BASS_StreamFree(_currentStreamHandle);
-                           // Stop(true); // true for songSkipped
+                            Stop(true); // true for songSkipped
 
-                        //}
+                        }
 
                         _currentStreamHandle = newStreamHandle;
 
@@ -1188,7 +1139,7 @@ namespace BassPlayer
                     if (result)
                     {
                         Log.Info("BASS: playback started");
-                        SetState(PlayState.Playing);
+                        _State = PlayState.Playing;
                         UpdateTimer.Start();
                         if (PlaybackStateChanged != null)
                         {
@@ -1201,11 +1152,8 @@ namespace BassPlayer
                     }
                     else
                     {
-                        // This is where you would handle an error after creating a stream but before playing.
-                        // The new FreeCurrentStream() method handles this now.
-                        //FreeCurrentStream();
-                        //Bass.BASS_StreamFree(_currentStreamHandle);
-                       // _currentStreamHandle = 0;
+                        Bass.BASS_StreamFree(_currentStreamHandle);
+                        _currentStreamHandle = 0;
                     }
                 }
                 catch (Exception ex)
@@ -1724,60 +1672,39 @@ namespace BassPlayer
             }
         }
 
-private void HandleSongEnded(bool bManualStop, bool songSkipped = false)
+        private void HandleSongEnded(bool bManualStop, bool songSkipped = false)
         {
             Log.Debug("BASS: HandleSongEnded - manualStop: {0}, CrossFading: {1}", bManualStop, _CrossFading);
+            PlayState oldState = _State;
 
             if (!bManualStop)
             {
+                //if (_CrossFading)
+                //{
+                //    _State = PlayState.Playing;
+                //}
+                //else
+                //{
                 FilePath = "";
-                SetState(PlayState.Ended);
+                _State = PlayState.Ended;
+
+                //}
             }
             else
             {
-                if (songSkipped)
-                {
-                    SetState(PlayState.Init);
-                }
-                else
-                {
-                    SetState(PlayState.Stopped);
-                }
+                _State = songSkipped ? PlayState.Init : PlayState.Stopped;
+            }
+
+            Util.Log.O("BASS: Playstate Changed - " + _State);
+
+            if (oldState != _State && PlaybackStateChanged != null)
+            {
+                PlaybackStateChanged(this, oldState, _State);
             }
 
             FinalizeDownloadStream();
-            _CrossFading = false;
+            _CrossFading = false; // Set crossfading to false, Play() will update it when the next song starts
         }
-
-        private void FreeCurrentStream()
-        {
-            if (_currentStreamHandle != 0)
-            {
-                Log.Debug($"BASS: FreeCurrentStream() called. Freeing handle {_currentStreamHandle}.");
-
-                // Remove all registered syncs for the stream
-                if (_streamSyncHandles.ContainsKey(_currentStreamHandle))
-                {
-                    foreach (int syncHandle in _streamSyncHandles[_currentStreamHandle])
-                    {
-                        // CORRECTED: Pass both the channel handle and the sync handle
-                        Bass.BASS_ChannelRemoveSync(_currentStreamHandle, syncHandle);
-                    }
-                    _streamSyncHandles.Remove(_currentStreamHandle);
-                }
-
-                Bass.BASS_StreamFree(_currentStreamHandle);
-                _currentStreamHandle = 0;
-            }
-        }
-
-
-
-
-
-
-
-
 
         /// <summary>
         /// Fade out Song
@@ -1828,7 +1755,7 @@ private void HandleSongEnded(bool bManualStop, bool songSkipped = false)
 
                     if (oldPlayState == PlayState.Paused)
                     {
-                        SetState(PlayState.Playing);
+                        _State = PlayState.Playing;
 
                         if (_SoftStop)
                         {
@@ -1848,7 +1775,7 @@ private void HandleSongEnded(bool bManualStop, bool songSkipped = false)
 
                     else
                     {
-                        SetState(PlayState.Paused);
+                        _State = PlayState.Paused;
                         UpdateTimer.Stop();
 
                         if (_SoftStop)

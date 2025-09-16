@@ -55,17 +55,10 @@ namespace Elpis
             base.OnStartup(e);
 
             // Process the first instance's args
-            //HandleCommandLine(Environment.GetCommandLineArgs());
+            HandleCommandLine(Environment.GetCommandLineArgs());
 
-            //if (Elpis.MainWindow._clo.ShowHelp)
-            //   Current.Shutdown();
-
-            var ok = HandleCommandLine(Environment.GetCommandLineArgs());
-                if (!ok)
-                    {
-                Current.Shutdown();   // we already showed help
-                        return;
-                    }
+            if (Elpis.MainWindow._clo.ShowHelp)
+                Current.Shutdown();
         }
 
 
@@ -106,7 +99,7 @@ namespace Elpis
             catch (OptionException ex)
             {
                 clo.ShowHelp = true;
-                //Elpis.MainWindow.SetCommandLine(clo);
+                Elpis.MainWindow.SetCommandLine(clo);
                 ShowHelp(p, ex.Message);
             }
 
@@ -115,11 +108,10 @@ namespace Elpis
             if (clo.ShowHelp)
             {
                 ShowHelp(p);
-                //}
-                //else if (Current?.MainWindow is Elpis.MainWindow mw)
-                //{
-                //    mw.DoCommandLine();
-                return false;
+            }
+            else if (Current?.MainWindow is Elpis.MainWindow mw)
+            {
+                mw.DoCommandLine();
             }
 
             return true;

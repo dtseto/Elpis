@@ -220,23 +220,12 @@ namespace Elpis
         }
 
 
-        private bool _cliHasRun = false;
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            //if (Interlocked.Exchange(ref _loadLogicOnce, 1) == 1) return; // already ran
+           // if (Interlocked.Exchange(ref _loadLogicOnce, 1) == 1) return; // already ran
 
             await LoadLogic(); // Perform asynchronous operations here
             Debug.WriteLine($"MainWindow Loaded: once={_loadLogicOnce}");
-
-            // only apply CLI flags once
-            if (!_cliHasRun && _clo != null)
-            {
-                _cliHasRun = true;
-                Debug.WriteLine($"Running CLI flags: station={_clo.StationToLoad}");
-                DoCommandLine();
-                _clo = null;
-            }
-
         }
 
         private void ListViewMenu_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -274,7 +263,6 @@ namespace Elpis
         public static CommandLineOptions _clo;
         public static void SetCommandLine(CommandLineOptions clo)
         {
-            Debug.WriteLine($"[App] Stashing CLI flags: station={clo.StationToLoad}");
             _clo = clo;
         }
 

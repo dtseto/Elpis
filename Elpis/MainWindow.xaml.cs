@@ -36,6 +36,8 @@ namespace Elpis
     {
         #region Globals
 
+        private TaskCompletionSource<List<Station>> _stationRefreshCompletion;
+
         private int _loadLogicOnce;
         private int _finalLoadOnce;
         private bool _uiEventsHooked;
@@ -1607,115 +1609,163 @@ namespace Elpis
         }
 
         //private void _player_ConnectionEvent(object sender, bool state, ErrorCodes code);
-        private bool _isConnecting = false; // Add this field to prevent re-entrancy
+       // private bool _isConnecting = false; // Add this field to prevent re-entrancy
 
-        private void _player_ConnectionEvent(object sender, bool state, ErrorCodes code)
+        private async void _player_ConnectionEvent(object sender, bool state, ErrorCodes code)
         {
-            if (state)
+            if (state) // Connection was successful
             {
-                _isConnecting = true; // Mark that we are connecting
+                // _isConnecting = true; // Mark that we are connecting
 
-                // If stations aren't loaded yet, explicitly refresh and wait.
-                if (_player.Stations == null || _player.Stations.Count == 0)
+                try
                 {
-                    Log.O("Connection successful, but station list is empty. Attempting to refresh.");
+                    List<Station> stations; // This will hold our safe copy of the station list.
 
-                    // Show a loading indicator while stations are fetched
-                    this.BeginDispatch(() =>
+                    if (_player.Stations == null || _player.Stations.Count == 0)
                     {
-                        transitionControl.ShowPage(_loadingPage);
-                        _loadingPage.UpdateStatus("Fetching stations...");
-                    });
+                        this.BeginDispatch(() =>
+                        {
+                            ShowPage(_loadingPage);
+                            _loadingPage.UpdateStatus("Fetching stations...");
+                        });
 
-                    // Refresh stations and wait for the StationsRefreshed event.
-                    _player.RefreshStations();
-                    // The actual logic to proceed will be in _player_StationsRefreshed and then _player_ConnectionEvent will be re-evaluated.
-                    return; // Exit this method and wait for StationsRefreshed
-                }
 
-                // If we reach here, stations are available.
-                Station s = null;
-                if (StartupStation != null)
-                {
-                    // Use GetStationFromString. Ensure it handles cases where the station might not be found.
-                    s = _player.GetStationFromString(StartupStation);
-                    if (s == null)
-                    {
-                        Log.O($"Startup station '{StartupStation}' not found. Falling back to last loaded station ID.");
-                        s = _player.GetStationFromID(_config.Fields.Pandora_LastStationID);
+
+                        // Initialize the class-level TaskCompletionSource.
+                        _stationRefreshCompletion = new TaskCompletionSource<List<Station>>();
+
+
+                        // Refresh stations and wait for the StationsRefreshed event.
+                        //_player.RefreshStations();
+                        // The actual logic to proceed will be in _player_StationsRefreshed and then _player_ConnectionEvent will be re-evaluated.
+                        //return; // Exit this method and wait for StationsRefreshed
+                        // Set up a 30-second timeout. or 10 seconds
+                        using (var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+                        {
+                            cts.Token.Register(() => _stationRefreshCompletion?.TrySetResult(null));
+
+                            // The persistent _player_StationsRefreshed handler will now complete this task.
+                            _player.RefreshStations();
+
+                            // Await the list of stations, which is passed directly from the event handler.
+                            stations = await _stationRefreshCompletion.Task;
+                        }
+
+                        if (stations == null)
+                        {
+                            throw new Exception("Failed to retrieve stations or the operation timed out.");
+                        }
                     }
-                }
-                else
-                {
-                    s = _player.GetStationFromID(_config.Fields.Pandora_LastStationID);
-                }
+                    else
+                    {
+                        // Stations were already loaded, so we can just use them.
+                        stations = _player.Stations;
+                    }
+                    // --- From this point on, we use our safe 'stations' variable, not _player.Stations ---
 
-                if (s != null)
-                {
+                    Station stationToPlay = null;
+                    // Helper function to find a station in our safe list
+                    Func<string, Station> findStation = (id) => stations.FirstOrDefault(s => s.ID == id);
+
+                    if (StartupStation != null)
+                    {
+                        stationToPlay = stations.FirstOrDefault(s => s.Name.Equals(StartupStation, StringComparison.OrdinalIgnoreCase));
+                        if (stationToPlay == null)
+                        {
+                            Log.O($"Startup station '{StartupStation}' not found by name. Trying by last saved ID.");
+                            stationToPlay = findStation(_config.Fields.Pandora_LastStationID);
+                        }
+                    }
+                    else
+                    {
+                        stationToPlay = findStation(_config.Fields.Pandora_LastStationID);
+                    }
+
+                    // Now that we have the data safely, dispatch the final UI update.
                     this.BeginDispatch(() =>
                     {
-                        _loadingPage.UpdateStatus("Loading Station:" + Environment.NewLine + s.Name);
-                        _player.PlayStation(s);
+                        // It's good practice to update the player's main list and the UI page's list.
+                        //_player.Stations = stations;
+                        _stationPage.Stations = stations;
+
+                        if (stationToPlay != null)
+                        {
+                            _loadingPage.UpdateStatus("Loading Station: " + stationToPlay.Name);
+                            _player.PlayStation(stationToPlay);
+                        }
+                        else
+                        {
+                            ShowPage(_stationPage);
+                        }
                     });
                 }
-                else
+                catch (Exception ex)
                 {
-                    this.BeginDispatch(ShowStationList);
+                    this.BeginDispatch(() => ShowError(ErrorCodes.ERROR_RPC, ex));
                 }
             }
-            else
+            else // Initial connection failed
             {
-                // Handle disconnection or initial connection failure
-                this.BeginDispatch(() => transitionControl.ShowPage(_loginPage));
-
-                // Show recoverable errors if there was one.
-                if (code != ErrorCodes.SUCCESS && !Errors.IsHardFail(code))
+                this.BeginDispatch(() =>
                 {
-                    _lastError = code;
-                    _lastException = null; // Clear previous exception if it was recoverable
-                    mainBar.ShowError(Errors.GetErrorMessage(code));
-                }
+                    ShowPage(_loginPage);
+                    if (code != ErrorCodes.SUCCESS && !Errors.IsHardFail(code))
+                    {
+                        _lastError = code;
+                        _lastException = null;
+                        mainBar.ShowError(Errors.GetErrorMessage(code));
+                    }
+                });
             }
-            _isConnecting = false; // Reset connection flag
         }
 
+
+
         // Add a flag to track if stations have been successfully loaded at least once.
-        private bool _stationsSuccessfullyLoaded = false;
+        //private bool _stationsSuccessfullyLoaded = false;
 
         // Add handler for StationsRefreshed
         private void _player_StationsRefreshed(object sender)
         {
-            this.BeginDispatch(() =>
-            {
-                Log.O("Station list refreshed.");
-                if (_player.Stations != null && _player.Stations.Count > 0)
-                {
-                    _stationsSuccessfullyLoaded = true;
-                    // If we were in the middle of connecting and waiting for stations,
-                    // now we can re-evaluate the connection event logic.
-                    if (_isConnecting)
-                    {
-                        // Re-calling the connection event logic ensures we proceed if stations are now available.
-                        // This is a simplified way to re-trigger the logic after refresh.
-                        _player_ConnectionEvent(_player, true, ErrorCodes.SUCCESS);
-                    }
-                }
-                else
-                {
-                    Log.O("Station list is still empty after refresh.");
-                    _stationsSuccessfullyLoaded = false;
-                    // If still no stations, and we were connecting, show an error or keep loading page.
-                    if (_isConnecting)
-                    {
-                        this.BeginDispatch(() =>
-                        {
-                            // Consider showing an error page for "no stations found" if persistent.
-                            // For now, we'll try to show station list which might be empty.
-                            ShowStationList();
-                        });
-                    }
-                }
-            });
+            Log.O("Station list refreshed successfully. Capturing data.");
+
+            // Capture the station list and pass it as the result of the task.
+            // We create a new List to ensure we have a safe copy.
+            var capturedStations = new List<Station>(_player.Stations);
+            _stationRefreshCompletion?.TrySetResult(capturedStations);
+
+            //this.BeginDispatch(() =>
+            //{
+            //Log.O("Station list refreshed.");
+            //if (_player.Stations != null && _player.Stations.Count > 0)
+            //{
+            //_stationsSuccessfullyLoaded = true;
+            // If we were in the middle of connecting and waiting for stations,
+            // now we can re-evaluate the connection event logic.
+            //if (_isConnecting)
+            //{
+            // Re-calling the connection event logic ensures we proceed if stations are now available.
+            // This is a simplified way to re-trigger the logic after refresh.
+            //_player_ConnectionEvent(_player, true, ErrorCodes.SUCCESS);
+            //}
+            //}
+            //else
+            //{
+            //Log.O("Station list is still empty after refresh.");
+            //_stationsSuccessfullyLoaded = false;
+            // If still no stations, and we were connecting, show an error or keep loading page.
+            //if (_isConnecting)
+            //{
+            //this.BeginDispatch(() =>
+            //{
+            // Consider showing an error page for "no stations found" if persistent.
+            // For now, we'll try to show station list which might be empty.
+            //ShowStationList();
+            //});
+            //}
+            //}
+            //});
         }
 
         private void UnregisterHotkeysSafe()

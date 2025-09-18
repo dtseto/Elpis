@@ -2,11 +2,11 @@
 using Elpis.Hotkeys;
 using Elpis.UpdateSystem;
 using GUI.BorderlessWindow;
+using GUI.PageTransition;
 using Microsoft.WindowsAPICodePack.Taskbar;
 using PandoraSharp;
 using PandoraSharp.Plugins;
 using PandoraSharpPlayer;
-using System;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -42,6 +42,7 @@ namespace Elpis
         private bool _pagesBuilt;
        private bool _pageEventsHooked;
 
+        private PageTransition transitionControl; // Declare the variable
 
         private readonly ErrorPage _errorPage;
         private HotKeyHost _keyHost;
@@ -159,6 +160,11 @@ namespace Elpis
         {
 
             InitializeComponent();
+
+            // Add this line:
+            transitionControl = new PageTransition();
+            // You might need to set properties or hook events if necessary for your PageTransition implementation.
+            // For instance, if your PageTransition needs the MainWindow context or other setup.
 
             SourceInitialized += MainWindow_SourceInitialized;
 
@@ -1550,10 +1556,10 @@ namespace Elpis
                 ShowPage(_aboutPage);
         }
 
-        private void _player_StationsRefreshed(object sender)
-        {
-            _stationPage.Stations = _player.Stations;
-        }
+        //private void _player_StationsRefreshed(object sender)
+        //{
+        //    _stationPage.Stations = _player.Stations;
+        //}
 
         private void mainBar_NextClick()
         {
@@ -1600,28 +1606,57 @@ namespace Elpis
             ShowPage(_loginPage);
         }
 
+        //private void _player_ConnectionEvent(object sender, bool state, ErrorCodes code);
+        private bool _isConnecting = false; // Add this field to prevent re-entrancy
+
         private void _player_ConnectionEvent(object sender, bool state, ErrorCodes code)
         {
             if (state)
             {
-                if (_config.Fields.Pandora_AutoPlay)
+                _isConnecting = true; // Mark that we are connecting
+
+                // If stations aren't loaded yet, explicitly refresh and wait.
+                if (_player.Stations == null || _player.Stations.Count == 0)
                 {
-                    Station s = null;
-                    if (StartupStation != null)
-                        s = _player.GetStationFromString(StartupStation);
+                    Log.O("Connection successful, but station list is empty. Attempting to refresh.");
+
+                    // Show a loading indicator while stations are fetched
+                    this.BeginDispatch(() =>
+                    {
+                        transitionControl.ShowPage(_loadingPage);
+                        _loadingPage.UpdateStatus("Fetching stations...");
+                    });
+
+                    // Refresh stations and wait for the StationsRefreshed event.
+                    _player.RefreshStations();
+                    // The actual logic to proceed will be in _player_StationsRefreshed and then _player_ConnectionEvent will be re-evaluated.
+                    return; // Exit this method and wait for StationsRefreshed
+                }
+
+                // If we reach here, stations are available.
+                Station s = null;
+                if (StartupStation != null)
+                {
+                    // Use GetStationFromString. Ensure it handles cases where the station might not be found.
+                    s = _player.GetStationFromString(StartupStation);
                     if (s == null)
                     {
+                        Log.O($"Startup station '{StartupStation}' not found. Falling back to last loaded station ID.");
                         s = _player.GetStationFromID(_config.Fields.Pandora_LastStationID);
                     }
-                    if (s != null)
+                }
+                else
+                {
+                    s = _player.GetStationFromID(_config.Fields.Pandora_LastStationID);
+                }
+
+                if (s != null)
+                {
+                    this.BeginDispatch(() =>
                     {
                         _loadingPage.UpdateStatus("Loading Station:" + Environment.NewLine + s.Name);
                         _player.PlayStation(s);
-                    }
-                    else
-                    {
-                        ShowStationList();
-                    }
+                    });
                 }
                 else
                 {
@@ -1630,8 +1665,57 @@ namespace Elpis
             }
             else
             {
-                ShowPage(_loginPage);
+                // Handle disconnection or initial connection failure
+                this.BeginDispatch(() => transitionControl.ShowPage(_loginPage));
+
+                // Show recoverable errors if there was one.
+                if (code != ErrorCodes.SUCCESS && !Errors.IsHardFail(code))
+                {
+                    _lastError = code;
+                    _lastException = null; // Clear previous exception if it was recoverable
+                    mainBar.ShowError(Errors.GetErrorMessage(code));
+                }
             }
+            _isConnecting = false; // Reset connection flag
+        }
+
+        // Add a flag to track if stations have been successfully loaded at least once.
+        private bool _stationsSuccessfullyLoaded = false;
+
+        // Add handler for StationsRefreshed
+        private void _player_StationsRefreshed(object sender)
+        {
+            this.BeginDispatch(() =>
+            {
+                Log.O("Station list refreshed.");
+                if (_player.Stations != null && _player.Stations.Count > 0)
+                {
+                    _stationsSuccessfullyLoaded = true;
+                    // If we were in the middle of connecting and waiting for stations,
+                    // now we can re-evaluate the connection event logic.
+                    if (_isConnecting)
+                    {
+                        // Re-calling the connection event logic ensures we proceed if stations are now available.
+                        // This is a simplified way to re-trigger the logic after refresh.
+                        _player_ConnectionEvent(_player, true, ErrorCodes.SUCCESS);
+                    }
+                }
+                else
+                {
+                    Log.O("Station list is still empty after refresh.");
+                    _stationsSuccessfullyLoaded = false;
+                    // If still no stations, and we were connecting, show an error or keep loading page.
+                    if (_isConnecting)
+                    {
+                        this.BeginDispatch(() =>
+                        {
+                            // Consider showing an error page for "no stations found" if persistent.
+                            // For now, we'll try to show station list which might be empty.
+                            ShowStationList();
+                        });
+                    }
+                }
+            });
         }
 
         private void UnregisterHotkeysSafe()

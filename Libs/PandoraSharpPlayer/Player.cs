@@ -511,12 +511,13 @@ namespace PandoraSharpPlayer
             }
         }
 
-        private int UpdatePlaylist()
+        private async Task<int> UpdatePlaylistAsync()
         {
             List<Song> result = new List<Song>();
             try
             {
-                result = CurrentStation.GetPlaylist();
+                // Offload the synchronous network call to a background thread
+                result = await Task.Run(() => CurrentStation.GetPlaylist());
             }
             catch (PandoraException ex)
             {
@@ -528,12 +529,12 @@ namespace PandoraSharpPlayer
             }
 
             if (result.Count == 0 && CurrentStation != null)
-                result = CurrentStation.GetPlaylist();
+                result = await Task.Run(() => CurrentStation.GetPlaylist());
 
             return _playlist.AddSongs(result);
         }
 
-        private void PlayThread()
+        private async Task PlayStationAsync()
         {
             if (StationLoading != null)
                 StationLoading(this, CurrentStation);
@@ -541,7 +542,8 @@ namespace PandoraSharpPlayer
 
             _playlist.ClearSongs();
 
-            if (UpdatePlaylist() == 0)
+            // Await the playlist without blocking
+            if (await UpdatePlaylistAsync() == 0)
                 throw new PandoraException(ErrorCodes._END_OF_PLAYLIST);
 
             if (StationLoaded != null)
@@ -554,7 +556,7 @@ namespace PandoraSharpPlayer
             }
             catch (Playlist.PlaylistEmptyException pex)
             {
-                if (UpdatePlaylist() == 0)
+                if (await UpdatePlaylistAsync() == 0)
                     throw new PandoraException(ErrorCodes._END_OF_PLAYLIST);
 
                 PlayNextSong();
@@ -666,7 +668,7 @@ namespace PandoraSharpPlayer
             CurrentStation = station;
             JumpList.AddToRecentCategory(station.asJumpTask());
 
-            RunTask(PlayThread);
+            RunTask(() => PlayStationAsync());
         }
 
         public bool PlayStation(string stationID)
@@ -923,7 +925,7 @@ namespace PandoraSharpPlayer
 
         private void _playlist_PlaylistLow(object sender, int count)
         {
-            RunTask(() => UpdatePlaylist());
+            RunTask(() => UpdatePlaylistAsync());
         }
 
         #endregion

@@ -9,6 +9,8 @@ As such, Elpis depends on an independent implementation of their private API, me
 It is the intention of it's creator that Elpis be kept up to date and compatible with the Pandora service and any needed changes be made quickly, but NO GURANTEE is provided to this effect.  
 If you find that Elpis no longer functions with the Pandora service please either run the application again and let it check for updates (occurs on every application start) or visit http://elpis.adamhaile.net (or https://github.com/adammhaile/Elpis).
 
+THIS TRACKING CODE BELOW IS SUPPOSED TO BE DISABLED BUT NO WARRANTY IS PROVIDED IT IS LOCATED IN MAIN WINDOW AND POSTSUBMITTER FILE.
+
 By installing Elpis, you agree to a small amount of data being collected and transmitted by the application for the purpose of providing the creator with minimal information on the current install base of the application.  This helps make the application better by allowing more targeted testing based on version and platform. 
 How small, you ask? This small:
 2011-12-13 06:25:51,068c23a6-9f48-4c2b-9237-f41077c2ab5f,0.8.0.0,0.8.1.991,Windows 7 Service Pack 1 32-bit

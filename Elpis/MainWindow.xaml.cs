@@ -822,24 +822,24 @@ namespace Elpis
                 _config.Fields.Elpis_Version = ver;
                 _config.SaveConfig();
 
-        #if APP_RELEASE
-                var post = new PostSubmitter(ReleaseData.AnalyticsPostURL);
+      //  #if APP_RELEASE
+               // var post = new PostSubmitter(ReleaseData.AnalyticsPostURL);
 
-                post.Add("guid", _config.Fields.Elpis_InstallID);
-                post.Add("curver", oldVer);
-                post.Add("newver", _config.Fields.Elpis_Version.ToString());
-                post.Add("osver", SystemInfo.GetWindowsVersion());
+              //  post.Add("guid", _config.Fields.Elpis_InstallID);
+               // post.Add("curver", oldVer);
+               // post.Add("newver", _config.Fields.Elpis_Version.ToString());
+               // post.Add("osver", SystemInfo.GetWindowsVersion());
 
-        try
-        {
-            await Task.Run(() => post.Send()); // Send analytics data asynchronously
-        }
-                catch(Exception ex)
-                {
-                    Log.O(ex.ToString());
-                }
-#endif
-            }
+      //  try
+       // {
+           // await Task.Run(() => post.Send()); // Send analytics data asynchronously
+      //  }
+        //        catch(Exception ex)
+         //       {
+         //           Log.O(ex.ToString());
+         //       }
+//#endif
+           // }
 
             _loadingPage.UpdateStatus("Loading core components...");
 

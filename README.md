@@ -8,7 +8,7 @@ There are x64 and ARM64 for windows ports.
 https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48
 
 Bugs: There are known occasional race conditions and glitches when changing stations or skipping tracks. Just close and restart the program. Most of them are fixed please report any glitches.
-
+Note that some older computers the station list might not display properly on newer versions this is race/async await issue. Use version 1.6.1.1 instead.
 
 
 ## Elpis not dead

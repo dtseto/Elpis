@@ -134,12 +134,12 @@ namespace Elpis
             ShowWait(false);
         }
 
-        private void StationList_Loaded(object sender, RoutedEventArgs e)
+        private async void StationList_Loaded(object sender, RoutedEventArgs e)
         {
             CloseRename();
             ShowWait(false);
             if (_player.StationSortOrder != _currSort)
-                _player.RefreshStations();
+                await _player.RefreshStationsAsync();
         }
 
         private void StationList_Unloaded(object sender, RoutedEventArgs e)

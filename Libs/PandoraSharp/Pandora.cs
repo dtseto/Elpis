@@ -340,7 +340,7 @@ namespace PandoraSharp
             return null;
         }
 
-        public async Task RefreshStations()
+        public async Task<List<Station>> RefreshStationsAsync()
         {
             Log.O("RefreshStations");
             if (StationsUpdatingEvent != null)
@@ -349,6 +349,9 @@ namespace PandoraSharp
             JObject req = new JObject();
             req["includeStationArtUrl"] = true;
             var stationList = await CallRPC("user.getStationList", req);
+            // Use this local variable throughout the method.
+            List<Station> localStations = new List<Station>();
+
             // Lock all modifications to the station lists
             lock (_stationListLock)
             {
@@ -403,10 +406,14 @@ namespace PandoraSharp
 
                 }
 
-                Stations.InsertRange(0, quickMixes);
+                localStations.InsertRange(0, quickMixes);
+                // Also update the public property for other parts of your app
+                this.Stations = localStations;
+
             } // end of lock
             if (StationUpdateEvent != null)
                 StationUpdateEvent(this);
+            return localStations;
         }
 
         //private string getSyncKey()
@@ -564,7 +571,7 @@ namespace PandoraSharp
                 if (_connected)
                 {
                     SendLoginStatus("Loading station list...");
-                    await RefreshStations();
+                    await RefreshStationsAsync();
                 }
                 else
                 {

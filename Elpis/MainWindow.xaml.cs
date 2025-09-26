@@ -822,119 +822,120 @@ namespace Elpis
                 _config.Fields.Elpis_Version = ver;
                 _config.SaveConfig();
 
-      //  #if APP_RELEASE
-               // var post = new PostSubmitter(ReleaseData.AnalyticsPostURL);
+                //  #if APP_RELEASE
+                // var post = new PostSubmitter(ReleaseData.AnalyticsPostURL);
 
-              //  post.Add("guid", _config.Fields.Elpis_InstallID);
-               // post.Add("curver", oldVer);
-               // post.Add("newver", _config.Fields.Elpis_Version.ToString());
-               // post.Add("osver", SystemInfo.GetWindowsVersion());
+                //  post.Add("guid", _config.Fields.Elpis_InstallID);
+                // post.Add("curver", oldVer);
+                // post.Add("newver", _config.Fields.Elpis_Version.ToString());
+                // post.Add("osver", SystemInfo.GetWindowsVersion());
 
-      //  try
-       // {
-           // await Task.Run(() => post.Send()); // Send analytics data asynchronously
-      //  }
-        //        catch(Exception ex)
-         //       {
-         //           Log.O(ex.ToString());
-         //       }
-//#endif
-           // }
+                //  try
+                // {
+                // await Task.Run(() => post.Send()); // Send analytics data asynchronously
+                //  }
+                //        catch(Exception ex)
+                //       {
+                //           Log.O(ex.ToString());
+                //       }
+                //#endif
+                // }
 
-            _loadingPage.UpdateStatus("Loading core components...");
+                _loadingPage.UpdateStatus("Loading core components...");
 
-            // 1. Create tasks for independent, long-running operations.
-            //    We use Task.Run to ensure they execute on background threads.
-            try
-            {
                 // 1. Create tasks for independent, long-running operations.
-                Task playerInitTask = Task.Run(() =>
+                //    We use Task.Run to ensure they execute on background threads.
+                try
                 {
-                    _player = new Player();
-                    // This line could throw an exception if BASS audio engine fails 
-                    _player.Initialize(_bassRegEmail, _bassRegKey);
-                    if (_config.Fields.Proxy_Address != string.Empty)
-                        _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-                            _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
-                    setOutputDevice(_config.Fields.System_OutputDevice);
+                    // 1. Create tasks for independent, long-running operations.
+                    Task playerInitTask = Task.Run(() =>
+                    {
+                        _player = new Player();
+                        // This line could throw an exception if BASS audio engine fails 
+                        _player.Initialize(_bassRegEmail, _bassRegKey);
+                        if (_config.Fields.Proxy_Address != string.Empty)
+                            _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
+                                _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
+                        setOutputDevice(_config.Fields.System_OutputDevice);
+                    });
+
+                    Task lastFmLoadTask = Task.Run(() => LoadLastFM());
+                    Task webServerTask = Task.Run(() => StartWebServer());
+
+                    // 2. Await all of them to complete in parallel. 
+                    //    If any task throws an exception, it will be caught by the catch block below.
+                    await Task.WhenAll(playerInitTask, lastFmLoadTask, webServerTask);
+                }
+                catch (Exception ex)
+                {
+                    // 3. Gracefully handle any startup error from the parallel tasks.
+                    //    This replaces the specific try-catch from the original code. 
+                    ShowError(ErrorCodes.ENGINE_INIT_ERROR, ex);
+                    return; // Stop further execution if a critical component failed
+                }
+
+                // 4. If all tasks succeeded, continue with the rest of the setup.
+                _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
+                _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
+                _player.Volume = _config.Fields.Elpis_Volume;
+
+                _player.PauseOnLock = _config.Fields.Elpis_PauseOnLock;
+                _player.MaxPlayed = _config.Fields.Elpis_MaxHistory;
+
+                //_player.ForceSSL = _config.Fields.Misc_ForceSSL;
+
+
+                _loadingPage.UpdateStatus("Setting up cache...");
+                string cachePath = Path.Combine(Config.ElpisAppData, "Cache");
+                if (!Directory.Exists(cachePath)) Directory.CreateDirectory(cachePath);
+                _player.ImageCachePath = cachePath;
+
+                // _loadingPage.UpdateStatus("Starting Web Server...");
+
+                //await Task.Run(StartWebServer); // Start the web server asynchronously
+
+                _loadingPage.UpdateStatus("Setting up UI...");
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    _keyHost = new HotKeyHost(this);
+                    ConfigureHotKeys();
+                    //SetupJumpListSafe();
+                    SetupNotifyIcon();
+                    mainBar.DataContext = _player; // To bind playstate
+                    SetupPages();
+                    SetupUIEvents();
+                    SetupPageEvents();
+                    //SetupThumbnailToolbarButtonsSafe();
                 });
 
-                Task lastFmLoadTask = Task.Run(() => LoadLastFM());
-                Task webServerTask = Task.Run(() => StartWebServer());
+                //this.Dispatch(SetupJumpList);
 
-                // 2. Await all of them to complete in parallel. 
-                //    If any task throws an exception, it will be caught by the catch block below.
-                await Task.WhenAll(playerInitTask, lastFmLoadTask, webServerTask);
+                //this.Dispatch(SetupNotifyIcon);
+
+                //this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
+
+                //this.Dispatch(SetupPages);
+                //this.Dispatch(SetupUIEvents);
+                //this.Dispatch(SetupPageEvents);
+
+                //this.Dispatch(SetupThumbnailToolbarButtons);
+
+                if (_config.Fields.Login_AutoLogin &&
+                       !string.IsNullOrEmpty(_config.Fields.Login_Email) &&
+                       !string.IsNullOrEmpty(_config.Fields.Login_Password))
+                {
+                    await Task.Run(() => _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password));
+                }
+                else
+                {
+                    await Dispatcher.InvokeAsync(() => _loginPage);
+                }
+
+                await Dispatcher.InvokeAsync(() => mainBar.Volume = _player.Volume);
+
+                _finalComplete = true;
             }
-            catch (Exception ex)
-            {
-                // 3. Gracefully handle any startup error from the parallel tasks.
-                //    This replaces the specific try-catch from the original code. 
-                ShowError(ErrorCodes.ENGINE_INIT_ERROR, ex);
-                return; // Stop further execution if a critical component failed
-            }
-
-            // 4. If all tasks succeeded, continue with the rest of the setup.
-            _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
-            _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
-            _player.Volume = _config.Fields.Elpis_Volume;
-
-            _player.PauseOnLock = _config.Fields.Elpis_PauseOnLock;
-            _player.MaxPlayed = _config.Fields.Elpis_MaxHistory;
-
-            //_player.ForceSSL = _config.Fields.Misc_ForceSSL;
-
-
-            _loadingPage.UpdateStatus("Setting up cache...");
-            string cachePath = Path.Combine(Config.ElpisAppData, "Cache");
-            if (!Directory.Exists(cachePath)) Directory.CreateDirectory(cachePath);
-            _player.ImageCachePath = cachePath;
-
-           // _loadingPage.UpdateStatus("Starting Web Server...");
-
-            //await Task.Run(StartWebServer); // Start the web server asynchronously
-
-            _loadingPage.UpdateStatus("Setting up UI...");
-
-            await Dispatcher.InvokeAsync(() =>
-            {
-                _keyHost = new HotKeyHost(this);
-                ConfigureHotKeys();
-                //SetupJumpListSafe();
-                SetupNotifyIcon();
-                mainBar.DataContext = _player; // To bind playstate
-                SetupPages();
-                SetupUIEvents();
-                SetupPageEvents();
-                //SetupThumbnailToolbarButtonsSafe();
-            });
-
-            //this.Dispatch(SetupJumpList);
-
-            //this.Dispatch(SetupNotifyIcon);
-
-            //this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
-
-            //this.Dispatch(SetupPages);
-            //this.Dispatch(SetupUIEvents);
-            //this.Dispatch(SetupPageEvents);
-
-            //this.Dispatch(SetupThumbnailToolbarButtons);
-
-            if (_config.Fields.Login_AutoLogin &&
-                   !string.IsNullOrEmpty(_config.Fields.Login_Email) &&
-                   !string.IsNullOrEmpty(_config.Fields.Login_Password))
-            {
-                await Task.Run(() => _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password));
-            }
-            else
-            {
-                await Dispatcher.InvokeAsync(() => _loginPage);
-            }
-
-            await Dispatcher.InvokeAsync(() => mainBar.Volume = _player.Volume);
-
-            _finalComplete = true;
         }
 
         public void ShowPage(UserControl control)
@@ -1373,7 +1374,7 @@ namespace Elpis
 
         private void _player_StationCreated(object sender, Station station)
         {
-            _player.RefreshStations();
+            _player.RefreshStationsAsync();
             this.BeginDispatch(() => _player.PlayStation(station));
             ShowPage(_playlistPage);
         }
@@ -1609,60 +1610,43 @@ namespace Elpis
         }
 
         //private void _player_ConnectionEvent(object sender, bool state, ErrorCodes code);
-       // private bool _isConnecting = false; // Add this field to prevent re-entrancy
-
+        // private bool _isConnecting = false; // Add this field to prevent re-entrancy
         private async void _player_ConnectionEvent(object sender, bool state, ErrorCodes code)
         {
             if (state) // Connection was successful
             {
-                // _isConnecting = true; // Mark that we are connecting
-
                 try
                 {
-                    List<Station> stations; // This will hold our safe copy of the station list.
+                    List<Station> stations;
 
+                    // Check if we need to fetch stations from the network.
                     if (_player.Stations == null || _player.Stations.Count == 0)
                     {
+                        // 1. Show the UI that we're loading something.
                         this.BeginDispatch(() =>
                         {
                             ShowPage(_loadingPage);
                             _loadingPage.UpdateStatus("Fetching stations...");
                         });
 
-
-
-                        // Initialize the class-level TaskCompletionSource.
-                        _stationRefreshCompletion = new TaskCompletionSource<List<Station>>();
-
-
-                        // Refresh stations and wait for the StationsRefreshed event.
-                        //_player.RefreshStations();
-                        // The actual logic to proceed will be in _player_StationsRefreshed and then _player_ConnectionEvent will be re-evaluated.
-                        //return; // Exit this method and wait for StationsRefreshed
-                        // Set up a 30-second timeout. or 10 seconds
-                        using (var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
-                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
-                        {
-                            cts.Token.Register(() => _stationRefreshCompletion?.TrySetResult(null));
-
-                            // The persistent _player_StationsRefreshed handler will now complete this task.
-                            _player.RefreshStations();
-
-                            // Await the list of stations, which is passed directly from the event handler.
-                            stations = await _stationRefreshCompletion.Task;
-                        }
-
-                        if (stations == null)
-                        {
-                            throw new Exception("Failed to retrieve stations or the operation timed out.");
-                        }
+                        // 2. Directly await the network call to get the stations.
+                        // This single line replaces all the TaskCompletionSource and CancellationToken logic.
+                        // The method will pause here until the network call is finished.
+                        stations = await _player.RefreshStationsAsync();
                     }
                     else
                     {
                         // Stations were already loaded, so we can just use them.
                         stations = _player.Stations;
                     }
-                    // --- From this point on, we use our safe 'stations' variable, not _player.Stations ---
+
+                    // If the network call failed or returned no stations, handle it gracefully.
+                    if (stations == null)
+                    {
+                        throw new Exception("Failed to retrieve stations. The list is empty.");
+                    }
+
+                    // --- From this point on, your existing logic for finding a station is great ---
 
                     Station stationToPlay = null;
                     // Helper function to find a station in our safe list
@@ -1682,11 +1666,9 @@ namespace Elpis
                         stationToPlay = findStation(_config.Fields.Pandora_LastStationID);
                     }
 
-                    // Now that we have the data safely, dispatch the final UI update.
+                    // 4. Now that we have the data safely, dispatch the final UI update.
                     this.BeginDispatch(() =>
                     {
-                        // It's good practice to update the player's main list and the UI page's list.
-                        //_player.Stations = stations;
                         _stationPage.Stations = stations;
 
                         if (stationToPlay != null)
@@ -1702,6 +1684,7 @@ namespace Elpis
                 }
                 catch (Exception ex)
                 {
+                    // The catch block will now handle any network errors from RefreshStationsAsync.
                     this.BeginDispatch(() => ShowError(ErrorCodes.ERROR_RPC, ex));
                 }
             }
@@ -1712,6 +1695,7 @@ namespace Elpis
                     ShowPage(_loginPage);
                     if (code != ErrorCodes.SUCCESS && !Errors.IsHardFail(code))
                     {
+                        // I noticed these variables were missing from your snippet, I've added them back.
                         _lastError = code;
                         _lastException = null;
                         mainBar.ShowError(Errors.GetErrorMessage(code));
@@ -1719,6 +1703,7 @@ namespace Elpis
                 });
             }
         }
+
 
 
 

@@ -746,10 +746,17 @@ namespace PandoraSharpPlayer
             SetStationSortOrder(sort);
         }
 
-        public void RefreshStations()
+        public async Task<List<Station>> RefreshStationsAsync()
         {
-            RunTask(() => _pandora.RefreshStations());
+            // This calls the new async method on the Pandora object and returns its result.
+            return await _pandora.RefreshStationsAsync();
         }
+
+
+        //public void RefreshStations()
+      //  {
+       //     RunTask(() => _pandora.RefreshStationsAsync());
+       // }
 
         public void StationDelete(Station station)
         {
@@ -757,7 +764,7 @@ namespace PandoraSharpPlayer
                         {
                             bool playQuickMix = (CurrentStation == null) ? false : (station.ID == CurrentStation.ID);
                             station.Delete();
-                            _pandora.RefreshStations();
+                            _pandora.RefreshStationsAsync();
                             if (playQuickMix)
                             {
                                 Log.O("Current station deleted, playing Quick Mix");

@@ -406,6 +406,9 @@ namespace PandoraSharp
 
                 }
 
+                // Add sorted regular stations to localStations
+                localStations.AddRange(Stations);
+                // Insert quick mixes at the beginning
                 localStations.InsertRange(0, quickMixes);
                 // Also update the public property for other parts of your app
                 this.Stations = localStations;

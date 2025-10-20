@@ -75,17 +75,16 @@ namespace PandoraSharp
                 try
                 {
                     ArtImage = File.ReadAllBytes(ArtCacheFile);
+                    downloadArt = false;
                 }
                 catch (Exception)
                 {
                     Log.O("Error retrieving image cache file: " + ArtCacheFile);
                     downloadArt = true;
                 }
-
-                downloadArt = false;
             }
 
-            /* if (downloadArt)
+            if (downloadArt)
             {
                 var value = d.SelectToken("artUrl");
                 if (value != null)
@@ -97,7 +96,7 @@ namespace PandoraSharp
                         try
                         {
                             ArtImage = PRequest.ByteRequest(ArtUrl);
-                            if (ArtImage.Length > 0)
+                            if (ArtImage.Length > 0 && !_pandora.ImageCachePath.Equals(""))
                                 File.WriteAllBytes(ArtCacheFile, ArtImage);
                         }
                         catch (Exception)
@@ -106,10 +105,7 @@ namespace PandoraSharp
                         }
                     }
                 }
-                //}
-                
             }
-            */
 
         }
 

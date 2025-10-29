@@ -407,6 +407,7 @@ namespace PandoraSharp
                 }
 
                 localStations.InsertRange(0, quickMixes);
+                localStations.AddRange(Stations);
                 // Also update the public property for other parts of your app
                 this.Stations = localStations;
 

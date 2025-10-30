@@ -349,8 +349,7 @@ namespace PandoraSharp
             JObject req = new JObject();
             req["includeStationArtUrl"] = true;
             var stationList = await CallRPC("user.getStationList", req);
-            // Use this local variable throughout the method.
-            List<Station> localStations = new List<Station>();
+            List<Station> combinedStations;
 
             // Lock all modifications to the station lists
             lock (_stationListLock)
@@ -358,26 +357,28 @@ namespace PandoraSharp
 
                 QuickMixStationIDs.Clear();
 
-                Stations = new List<Station>();
+                var fetchedStations = new List<Station>();
                 var stations = stationList.Result["stations"];
                 foreach (JToken d in stations)
                 {
-                    Stations.Add(new Station(this, d));
+                    fetchedStations.Add(new Station(this, d));
                 }
                 //foreach (PDict s in stationList)
                 //    Stations.Add(new Station(this, s));
 
                 if (QuickMixStationIDs.Count > 0)
                 {
-                    foreach (Station s in Stations)
+                    foreach (Station s in fetchedStations)
                     {
                         if (QuickMixStationIDs.Contains(s.ID))
                             s.UseQuickMix = true;
                     }
                 }
 
-                List<Station> quickMixes = Stations.FindAll(x => x.IsQuickMix);
-                Stations = Stations.FindAll(x => !x.IsQuickMix);
+                var quickMixes = fetchedStations.Where(x => x.IsQuickMix).ToList();
+                var regularStations = fetchedStations.Where(x => !x.IsQuickMix).ToList();
+
+                Stations = regularStations;
 
                 switch (StationSortOrder)
                 {
@@ -406,14 +407,17 @@ namespace PandoraSharp
 
                 }
 
-                localStations.InsertRange(0, quickMixes);
+                var sortedStations = Stations;
+                combinedStations = new List<Station>(quickMixes.Count + sortedStations.Count);
+                combinedStations.AddRange(quickMixes);
+                combinedStations.AddRange(sortedStations);
                 // Also update the public property for other parts of your app
-                this.Stations = localStations;
+                this.Stations = combinedStations;
 
             } // end of lock
             if (StationUpdateEvent != null)
                 StationUpdateEvent(this);
-            return localStations;
+            return combinedStations;
         }
 
         //private string getSyncKey()

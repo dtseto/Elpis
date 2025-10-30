@@ -349,8 +349,6 @@ namespace PandoraSharp
             JObject req = new JObject();
             req["includeStationArtUrl"] = true;
             var stationList = await CallRPC("user.getStationList", req);
-            // Use this local variable throughout the method.
-            List<Station> localStations = new List<Station>();
 
             // Lock all modifications to the station lists
             lock (_stationListLock)
@@ -358,62 +356,62 @@ namespace PandoraSharp
 
                 QuickMixStationIDs.Clear();
 
-                Stations = new List<Station>();
+                var freshStations = new List<Station>();
                 var stations = stationList.Result["stations"];
                 foreach (JToken d in stations)
                 {
-                    Stations.Add(new Station(this, d));
+                    freshStations.Add(new Station(this, d));
                 }
                 //foreach (PDict s in stationList)
                 //    Stations.Add(new Station(this, s));
 
                 if (QuickMixStationIDs.Count > 0)
                 {
-                    foreach (Station s in Stations)
+                    foreach (Station s in freshStations)
                     {
                         if (QuickMixStationIDs.Contains(s.ID))
                             s.UseQuickMix = true;
                     }
                 }
 
-                List<Station> quickMixes = Stations.FindAll(x => x.IsQuickMix);
-                Stations = Stations.FindAll(x => !x.IsQuickMix);
+                List<Station> quickMixes = freshStations.FindAll(x => x.IsQuickMix);
+                var orderedStations = freshStations.FindAll(x => !x.IsQuickMix);
 
                 switch (StationSortOrder)
                 {
                     case SortOrder.DateDesc:
                         //Stations = Stations.OrderByDescending(x => x.ID).ToList();
-                        Stations = Stations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
+                        orderedStations = orderedStations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
                         break;
                     case SortOrder.DateAsc:
                         //Stations = Stations.OrderBy(x => x.ID).ToList();
-                        Stations = Stations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
+                        orderedStations = orderedStations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
                         break;
                     case SortOrder.AlphaDesc:
-                        Stations = Stations.OrderByDescending(x => x.Name).ToList();
+                        orderedStations = orderedStations.OrderByDescending(x => x.Name).ToList();
                         break;
                     case SortOrder.AlphaAsc:
-                        Stations = Stations.OrderBy(x => x.Name).ToList();
+                        orderedStations = orderedStations.OrderBy(x => x.Name).ToList();
                         break;
                     case SortOrder.RatingAsc:
                         GetStationMetaData();
-                        Stations = Stations.OrderBy(x => x.ThumbsUp).ToList();
+                        orderedStations = orderedStations.OrderBy(x => x.ThumbsUp).ToList();
                         break;
                     case SortOrder.RatingDesc:
                         GetStationMetaData();
-                        Stations = Stations.OrderByDescending(x => x.ThumbsUp).ToList();
+                        orderedStations = orderedStations.OrderByDescending(x => x.ThumbsUp).ToList();
                         break;
 
                 }
 
-                localStations.InsertRange(0, quickMixes);
+                quickMixes.AddRange(orderedStations);
                 // Also update the public property for other parts of your app
-                this.Stations = localStations;
+                this.Stations = quickMixes;
 
             } // end of lock
             if (StationUpdateEvent != null)
                 StationUpdateEvent(this);
-            return localStations;
+            return Stations;
         }
 
         //private string getSyncKey()

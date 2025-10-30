@@ -282,7 +282,7 @@ namespace PandoraSharp
             return response;
         }
 
-        protected internal async Task<JSONResult> CallRPC(string method, JObject request = null, bool isAuth = false, bool useSSL = false)
+        protected internal virtual async Task<JSONResult> CallRPC(string method, JObject request = null, bool isAuth = false, bool useSSL = false)
         {
             try
             {
@@ -343,77 +343,81 @@ namespace PandoraSharp
         public async Task<List<Station>> RefreshStationsAsync()
         {
             Log.O("RefreshStations");
-            if (StationsUpdatingEvent != null)
-                StationsUpdatingEvent(this);
+            StationsUpdatingEvent?.Invoke(this);
 
-            JObject req = new JObject();
-            req["includeStationArtUrl"] = true;
+            JObject req = new JObject
+            {
+                ["includeStationArtUrl"] = true
+            };
+
             var stationList = await CallRPC("user.getStationList", req);
-            // Use this local variable throughout the method.
-            List<Station> localStations = new List<Station>();
 
-            // Lock all modifications to the station lists
+            List<Station> quickMixes;
+            List<Station> normalStations;
+
             lock (_stationListLock)
             {
-
                 QuickMixStationIDs.Clear();
 
-                Stations = new List<Station>();
-                var stations = stationList.Result["stations"];
-                foreach (JToken d in stations)
+                var fetchedStations = new List<Station>();
+                var stationsToken = stationList?.Result?["stations"] as JArray;
+
+                if (stationsToken != null)
                 {
-                    Stations.Add(new Station(this, d));
+                    foreach (JToken d in stationsToken)
+                    {
+                        fetchedStations.Add(new Station(this, d));
+                    }
                 }
-                //foreach (PDict s in stationList)
-                //    Stations.Add(new Station(this, s));
 
                 if (QuickMixStationIDs.Count > 0)
                 {
-                    foreach (Station s in Stations)
+                    foreach (Station s in fetchedStations)
                     {
                         if (QuickMixStationIDs.Contains(s.ID))
                             s.UseQuickMix = true;
                     }
                 }
 
-                List<Station> quickMixes = Stations.FindAll(x => x.IsQuickMix);
-                Stations = Stations.FindAll(x => !x.IsQuickMix);
+                quickMixes = fetchedStations.Where(x => x.IsQuickMix).ToList();
+                normalStations = fetchedStations.Where(x => !x.IsQuickMix).ToList();
+            }
 
-                switch (StationSortOrder)
-                {
-                    case SortOrder.DateDesc:
-                        //Stations = Stations.OrderByDescending(x => x.ID).ToList();
-                        Stations = Stations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
-                        break;
-                    case SortOrder.DateAsc:
-                        //Stations = Stations.OrderBy(x => x.ID).ToList();
-                        Stations = Stations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
-                        break;
-                    case SortOrder.AlphaDesc:
-                        Stations = Stations.OrderByDescending(x => x.Name).ToList();
-                        break;
-                    case SortOrder.AlphaAsc:
-                        Stations = Stations.OrderBy(x => x.Name).ToList();
-                        break;
-                    case SortOrder.RatingAsc:
-                        GetStationMetaData();
-                        Stations = Stations.OrderBy(x => x.ThumbsUp).ToList();
-                        break;
-                    case SortOrder.RatingDesc:
-                        GetStationMetaData();
-                        Stations = Stations.OrderByDescending(x => x.ThumbsUp).ToList();
-                        break;
+            switch (StationSortOrder)
+            {
+                case SortOrder.DateDesc:
+                    normalStations = normalStations.OrderByDescending(x => Convert.ToInt64(x.ID)).ToList();
+                    break;
+                case SortOrder.DateAsc:
+                    normalStations = normalStations.OrderBy(x => Convert.ToInt64(x.ID)).ToList();
+                    break;
+                case SortOrder.AlphaDesc:
+                    normalStations = normalStations.OrderByDescending(x => x.Name).ToList();
+                    break;
+                case SortOrder.AlphaAsc:
+                    normalStations = normalStations.OrderBy(x => x.Name).ToList();
+                    break;
+                case SortOrder.RatingAsc:
+                    await GetStationMetaData(normalStations);
+                    normalStations = normalStations.OrderBy(x => x.ThumbsUp).ToList();
+                    break;
+                case SortOrder.RatingDesc:
+                    await GetStationMetaData(normalStations);
+                    normalStations = normalStations.OrderByDescending(x => x.ThumbsUp).ToList();
+                    break;
+            }
 
-                }
+            var orderedStations = new List<Station>(quickMixes.Count + normalStations.Count);
+            orderedStations.AddRange(quickMixes);
+            orderedStations.AddRange(normalStations);
 
-                localStations.InsertRange(0, quickMixes);
-                // Also update the public property for other parts of your app
-                this.Stations = localStations;
+            lock (_stationListLock)
+            {
+                Stations = orderedStations;
+            }
 
-            } // end of lock
-            if (StationUpdateEvent != null)
-                StationUpdateEvent(this);
-            return localStations;
+            StationUpdateEvent?.Invoke(this);
+            return orderedStations;
         }
 
         //private string getSyncKey()
@@ -677,11 +681,14 @@ namespace PandoraSharp
             return station;
         }
 
-        private async Task GetStationMetaData()
+        private async Task GetStationMetaData(IEnumerable<Station> stationsToProcess)
         {
             Log.O("RetrieveStationMetaData");
 
-            foreach (var station in Stations)
+            if (stationsToProcess == null)
+                return;
+
+            foreach (var station in stationsToProcess)
             {
                 JObject req = new JObject
                 {

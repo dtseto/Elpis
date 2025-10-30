@@ -46,10 +46,14 @@
     <Reference Include="Microsoft.VisualStudio.TestPlatform.TestFramework.Extensions, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\packages\MSTest.TestFramework.2.2.10\lib\net45\Microsoft.VisualStudio.TestPlatform.TestFramework.Extensions.dll</HintPath>
     </Reference>
+    <Reference Include="Newtonsoft.Json, Version=7.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.7.0.1\lib\net40\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="PandoraStationRefreshTests.cs" />
     <Compile Include="UnitTest1.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
@@ -60,6 +64,10 @@
     <ProjectReference Include="..\Libs\BassPlayer\BassPlayer.csproj">
       <Project>{d054f1ed-6a9c-4c4d-b500-7c1af01f16c9}</Project>
       <Name>BassPlayer</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Libs\PandoraSharp\PandoraSharp.csproj">
+      <Project>{64DD2B7D-9069-41FF-A4E4-732F6DF82F09}</Project>
+      <Name>PandoraSharp</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

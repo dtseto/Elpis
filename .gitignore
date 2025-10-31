@@ -1,0 +1,13 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio cache/options
+.vs/
+
+# NuGet Packages
+packages/
+
+# Build artifacts
+*.log
+UpgradeLog.htm

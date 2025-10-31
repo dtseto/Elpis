@@ -103,7 +103,8 @@
                         </ListView>
                         
                     </StackPanel>
-                    <Button Grid.Column="1" Name="btnLogout" Margin="5"  Content="Logout" VerticalAlignment="Bottom" HorizontalAlignment="left"  Style="{DynamicResource MaterialDesignFlatButton}">
+                    <Button Grid.Column="1" Name="btnLogout" Margin="5"  Content="Logout" VerticalAlignment="Bottom" HorizontalAlignment="left"  Style="{DynamicResource MaterialDesignFlatButton}"
+                            Click="btnLogout_Click">
                         <Button.ToolTip>
                             <TextBlock FontSize="14">
                                     Logs out off the current session

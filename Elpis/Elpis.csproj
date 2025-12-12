@@ -536,6 +536,10 @@
       <Project>{A79647D6-4A05-4382-8B6E-4FEC154C3222}</Project>
       <Name>Util</Name>
     </ProjectReference>
+    <ProjectReference Include="..\Elpis.Core\Elpis.Core.csproj">
+      <Project>{07E8151D-E5B1-465F-88E6-10A6F536A9DA}</Project>
+      <Name>Elpis.Core</Name>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\main_icon.ico" />

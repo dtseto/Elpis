@@ -46,6 +46,7 @@ namespace Elpis
 
         private PageTransition transitionControl; // Declare the variable
 
+        private readonly StartupCoordinator _startupCoordinator;
         private readonly ErrorPage _errorPage;
         private HotKeyHost _keyHost;
         private readonly LoadingPage _loadingPage;
@@ -184,6 +185,18 @@ namespace Elpis
 
             _loadingPage = new LoadingPage();
             //transitionControl.ShowPage(_loadingPage);
+
+            _startupCoordinator = new StartupCoordinator(
+                () => _initComplete,
+                () => _finalComplete,
+                () => CurrentPage,
+                () => _loadingPage,
+                () =>
+                {
+                    var _ = FinalLoad();
+                });
+
+            ShowPage(_loadingPage);
 
             _update = new UpdateCheck();
 
@@ -804,8 +817,11 @@ namespace Elpis
                 return false;
             }
             _initComplete = true;
+            EnsureFinalLoadQueued();
             return true;
         }
+
+        private void EnsureFinalLoadQueued() => _startupCoordinator?.EnsureFinalLoadQueued();
 
         private async Task FinalLoad()
         {
@@ -813,11 +829,13 @@ namespace Elpis
 
             // version check code
             Version ver = Assembly.GetEntryAssembly().GetName().Version;
-            if (_config.Fields.Elpis_Version == null || _config.Fields.Elpis_Version < ver)
+            bool needsUpdateLogic = _config.Fields.Elpis_Version == null || _config.Fields.Elpis_Version < ver;
+
+            if (needsUpdateLogic)
             {
                 _loadingPage.UpdateStatus("Running update logic...");
 
-                string oldVer = _config.Fields.Elpis_Version.ToString();
+                string oldVer = _config.Fields.Elpis_Version?.ToString() ?? "unknown";
 
                 _config.Fields.Elpis_Version = ver;
                 _config.SaveConfig();
@@ -840,102 +858,103 @@ namespace Elpis
                 //       }
                 //#endif
                 // }
+            }
 
-                _loadingPage.UpdateStatus("Loading core components...");
+            _loadingPage.UpdateStatus("Loading core components...");
 
+            // 1. Create tasks for independent, long-running operations.
+            //    We use Task.Run to ensure they execute on background threads.
+            try
+            {
                 // 1. Create tasks for independent, long-running operations.
-                //    We use Task.Run to ensure they execute on background threads.
-                try
+                Task playerInitTask = Task.Run(() =>
                 {
-                    // 1. Create tasks for independent, long-running operations.
-                    Task playerInitTask = Task.Run(() =>
-                    {
-                        _player = new Player();
-                        // This line could throw an exception if BASS audio engine fails 
-                        _player.Initialize(_bassRegEmail, _bassRegKey);
-                        if (_config.Fields.Proxy_Address != string.Empty)
-                            _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
-                                _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
-                        setOutputDevice(_config.Fields.System_OutputDevice);
-                    });
-
-                    Task lastFmLoadTask = Task.Run(() => LoadLastFM());
-                    Task webServerTask = Task.Run(() => StartWebServer());
-
-                    // 2. Await all of them to complete in parallel. 
-                    //    If any task throws an exception, it will be caught by the catch block below.
-                    await Task.WhenAll(playerInitTask, lastFmLoadTask, webServerTask);
-                }
-                catch (Exception ex)
-                {
-                    // 3. Gracefully handle any startup error from the parallel tasks.
-                    //    This replaces the specific try-catch from the original code. 
-                    ShowError(ErrorCodes.ENGINE_INIT_ERROR, ex);
-                    return; // Stop further execution if a critical component failed
-                }
-
-                // 4. If all tasks succeeded, continue with the rest of the setup.
-                _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
-                _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
-                _player.Volume = _config.Fields.Elpis_Volume;
-
-                _player.PauseOnLock = _config.Fields.Elpis_PauseOnLock;
-                _player.MaxPlayed = _config.Fields.Elpis_MaxHistory;
-
-                //_player.ForceSSL = _config.Fields.Misc_ForceSSL;
-
-
-                _loadingPage.UpdateStatus("Setting up cache...");
-                string cachePath = Path.Combine(Config.ElpisAppData, "Cache");
-                if (!Directory.Exists(cachePath)) Directory.CreateDirectory(cachePath);
-                _player.ImageCachePath = cachePath;
-
-                // _loadingPage.UpdateStatus("Starting Web Server...");
-
-                //await Task.Run(StartWebServer); // Start the web server asynchronously
-
-                _loadingPage.UpdateStatus("Setting up UI...");
-
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    _keyHost = new HotKeyHost(this);
-                    ConfigureHotKeys();
-                    //SetupJumpListSafe();
-                    SetupNotifyIcon();
-                    mainBar.DataContext = _player; // To bind playstate
-                    SetupPages();
-                    SetupUIEvents();
-                    SetupPageEvents();
-                    //SetupThumbnailToolbarButtonsSafe();
+                    _player = new Player();
+                    // This line could throw an exception if BASS audio engine fails 
+                    _player.Initialize(_bassRegEmail, _bassRegKey);
+                    if (_config.Fields.Proxy_Address != string.Empty)
+                        _player.SetProxy(_config.Fields.Proxy_Address, _config.Fields.Proxy_Port,
+                            _config.Fields.Proxy_User, _config.Fields.Proxy_Password);
+                    setOutputDevice(_config.Fields.System_OutputDevice);
                 });
 
-                //this.Dispatch(SetupJumpList);
+                Task lastFmLoadTask = Task.Run(() => LoadLastFM());
+                Task webServerTask = Task.Run(() => StartWebServer());
 
-                //this.Dispatch(SetupNotifyIcon);
-
-                //this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
-
-                //this.Dispatch(SetupPages);
-                //this.Dispatch(SetupUIEvents);
-                //this.Dispatch(SetupPageEvents);
-
-                //this.Dispatch(SetupThumbnailToolbarButtons);
-
-                if (_config.Fields.Login_AutoLogin &&
-                       !string.IsNullOrEmpty(_config.Fields.Login_Email) &&
-                       !string.IsNullOrEmpty(_config.Fields.Login_Password))
-                {
-                    await Task.Run(() => _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password));
-                }
-                else
-                {
-                    await Dispatcher.InvokeAsync(() => _loginPage);
-                }
-
-                await Dispatcher.InvokeAsync(() => mainBar.Volume = _player.Volume);
-
-                _finalComplete = true;
+                // 2. Await all of them to complete in parallel. 
+                //    If any task throws an exception, it will be caught by the catch block below.
+                await Task.WhenAll(playerInitTask, lastFmLoadTask, webServerTask);
             }
+            catch (Exception ex)
+            {
+                // 3. Gracefully handle any startup error from the parallel tasks.
+                //    This replaces the specific try-catch from the original code. 
+                ShowError(ErrorCodes.ENGINE_INIT_ERROR, ex);
+                return; // Stop further execution if a critical component failed
+            }
+
+            // 4. If all tasks succeeded, continue with the rest of the setup.
+            _player.AudioFormat = _config.Fields.Pandora_AudioFormat;
+            _player.SetStationSortOrder(_config.Fields.Pandora_StationSortOrder);
+            _player.Volume = _config.Fields.Elpis_Volume;
+
+            _player.PauseOnLock = _config.Fields.Elpis_PauseOnLock;
+            _player.MaxPlayed = _config.Fields.Elpis_MaxHistory;
+
+            //_player.ForceSSL = _config.Fields.Misc_ForceSSL;
+
+
+            _loadingPage.UpdateStatus("Setting up cache...");
+            string cachePath = Path.Combine(Config.ElpisAppData, "Cache");
+            if (!Directory.Exists(cachePath)) Directory.CreateDirectory(cachePath);
+            _player.ImageCachePath = cachePath;
+
+            // _loadingPage.UpdateStatus("Starting Web Server...");
+
+            //await Task.Run(StartWebServer); // Start the web server asynchronously
+
+            _loadingPage.UpdateStatus("Setting up UI...");
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                _keyHost = new HotKeyHost(this);
+                ConfigureHotKeys();
+                //SetupJumpListSafe();
+                SetupNotifyIcon();
+                mainBar.DataContext = _player; // To bind playstate
+                SetupPages();
+                SetupUIEvents();
+                SetupPageEvents();
+                //SetupThumbnailToolbarButtonsSafe();
+            });
+
+            //this.Dispatch(SetupJumpList);
+
+            //this.Dispatch(SetupNotifyIcon);
+
+            //this.Dispatch(() => mainBar.DataContext = _player); //To bind playstate
+
+            //this.Dispatch(SetupPages);
+            //this.Dispatch(SetupUIEvents);
+            //this.Dispatch(SetupPageEvents);
+
+            //this.Dispatch(SetupThumbnailToolbarButtons);
+
+            if (_config.Fields.Login_AutoLogin &&
+                   !string.IsNullOrEmpty(_config.Fields.Login_Email) &&
+                   !string.IsNullOrEmpty(_config.Fields.Login_Password))
+            {
+                _loadingPage.UpdateStatus("Signing in...");
+                await Task.Run(() => _player.Connect(_config.Fields.Login_Email, _config.Fields.Login_Password));
+            }
+            else
+            {
+                await Dispatcher.InvokeAsync(() => ShowPage(_loginPage));
+            }
+
+            await Dispatcher.InvokeAsync(() => mainBar.Volume = _player.Volume);
+
+            _finalComplete = true;
         }
 
         public void ShowPage(UserControl control)
@@ -951,6 +970,7 @@ namespace Elpis
             }
             Dispatcher.Invoke(() => cntCtrl.Content = control);
 
+            EnsureFinalLoadQueued();
         }
 
 

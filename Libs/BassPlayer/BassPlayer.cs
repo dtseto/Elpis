@@ -136,17 +136,26 @@ namespace BassPlayer
 
             public TimeSpan RemainingTime
             {
-                get { return TotalTime - ElapsedTime; }
+                get
+                {
+                    var remaining = TotalTime - ElapsedTime;
+                    return remaining < TimeSpan.Zero ? TimeSpan.Zero : remaining;
+                }
             }
 
             public double Percent
             {
                 get
                 {
-                    if (TotalTime.Ticks == 0)
+                    if (TotalTime.Ticks <= 0)
                         return 0.0;
 
-                    return ((ElapsedTime.TotalSeconds/TotalTime.TotalSeconds)*100);
+                    var percent = (ElapsedTime.TotalSeconds/TotalTime.TotalSeconds)*100;
+                    if (double.IsNaN(percent) || double.IsInfinity(percent))
+                        return 0.0;
+                    if (percent < 0) return 0.0;
+                    if (percent > 100) return 100.0;
+                    return percent;
                 }
             }
         }
@@ -1457,11 +1466,21 @@ namespace BassPlayer
                 return 0;
             }
 
-            // length in bytes
+            // decoded length in bytes (PCM)
             long len = Bass.BASS_ChannelGetLength(stream);
+            if (len <= 0)
+            {
+                return 0;
+            }
 
-            // the total time length
             double totaltime = Bass.BASS_ChannelBytes2Seconds(stream, len);
+            if (double.IsNaN(totaltime) || double.IsInfinity(totaltime) || totaltime <= 0)
+                return 0;
+
+            // Pandora tracks are rarely longer than ~15 minutes; treat larger values as unknown
+            if (totaltime >= 900)
+                return 0;
+
             return totaltime;
         }
 

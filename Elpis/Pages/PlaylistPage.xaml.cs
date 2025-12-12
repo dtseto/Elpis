@@ -20,6 +20,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -175,11 +176,26 @@ namespace Elpis
 
             this.BeginDispatch(() =>
             {
-                String[] stat = txtStationName.Text.Split('-');
-                if (stat[0].Equals("Quick Mix"))
+                var stationLabel = txtStationName.Text ?? string.Empty;
+                if (!stationLabel.StartsWith("Quick Mix", StringComparison.OrdinalIgnoreCase))
                 {
-                    txtStationName.Text = stat[0]+"-"+song.Station.Name;
+                    return;
                 }
+
+                if (song == null || string.IsNullOrEmpty(song.StationID))
+                {
+                    return;
+                }
+
+                var stations = _player.Stations;
+                var songStation = stations?.FirstOrDefault(s => s.ID == song.StationID);
+
+                if (songStation == null || string.IsNullOrWhiteSpace(songStation.Name))
+                {
+                    return; // station details have not been hydrated yet
+                }
+
+                txtStationName.Text = $"Quick Mix - {songStation.Name}";
             });
         }
 

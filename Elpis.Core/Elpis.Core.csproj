@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <RootNamespace>Elpis</RootNamespace>
+    <AssemblyName>Elpis.Core</AssemblyName>
+  </PropertyGroup>
+</Project>
